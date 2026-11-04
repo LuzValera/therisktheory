@@ -29,3 +29,9 @@ Asmussen, S., & Albrecher, H. (2010). *Ruin Probabilities* (2nd ed.). World Scie
 | Used for | Location |
 |---|---|
 | Diffusion approximations to ruin probabilities vs. exact Cramér-Lundberg bounds | Chapter 4 |
+
+### Klugman, Stuart A., Panjer, Harry H., & Willmot, Gordon E. (2019)
+Klugman, S. A., Panjer, H. H., & Willmot, G. E. (2019). *Loss Models: From Data to Decisions* (5th ed.). Wiley.
+| Used for | Location |
+|---|---|
+| Collective risk models, aggregate loss distributions, and simulation | Chapter 9 |
