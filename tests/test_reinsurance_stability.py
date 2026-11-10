@@ -140,8 +140,50 @@ def test_insurer_reciprocity_metric_financial_balance() -> None:
 
 
 # ============================================================================
-# Domain and error handling tests
+# Domain, non-finite, and error handling tests
 # ============================================================================
+
+
+@pytest.mark.parametrize("bad_val", [np.nan, np.inf, -np.inf])
+def test_stability_non_finite_rejection(bad_val: float) -> None:
+    """Verify that stability functions reject non-finite inputs (NaN and Inf)."""
+    # 1. technical_result_variance
+    with pytest.raises(ValueError, match="finite"):
+        technical_result_variance(bad_val, 10.0, 10.0, 100.0, 400.0)
+    with pytest.raises(ValueError, match="finite"):
+        technical_result_variance(0.5, bad_val, 10.0, 100.0, 400.0)
+    with pytest.raises(ValueError, match="finite"):
+        technical_result_variance(0.5, 10.0, bad_val, 100.0, 400.0)
+    with pytest.raises(ValueError, match="finite"):
+        technical_result_variance(0.5, 10.0, 10.0, bad_val, 400.0)
+    with pytest.raises(ValueError, match="finite"):
+        technical_result_variance(0.5, 10.0, 10.0, 100.0, bad_val)
+
+    # 2. optimal_reinsurance
+    with pytest.raises(ValueError, match="finite"):
+        optimal_reinsurance(bad_val, 1000.0, 0.20, target_variance=500.0)
+    with pytest.raises(ValueError, match="finite"):
+        optimal_reinsurance(100.0, bad_val, 0.20, target_variance=500.0)
+    with pytest.raises(ValueError, match="finite"):
+        optimal_reinsurance(100.0, 1000.0, bad_val, target_variance=500.0)
+    with pytest.raises(ValueError, match="finite"):
+        optimal_reinsurance(100.0, 1000.0, 0.20, target_variance=bad_val)
+    with pytest.raises(ValueError, match="finite"):
+        optimal_reinsurance(100.0, 1000.0, 0.20, criterion="mean_variance", risk_aversion=bad_val)
+    with pytest.raises(ValueError, match="finite"):
+        optimal_reinsurance(100.0, 1000.0, 0.20, criterion="premium_budget", premium_budget=bad_val)
+
+    # 3. insurer_reciprocity_metric
+    with pytest.raises(ValueError, match="finite"):
+        insurer_reciprocity_metric(bad_val, 100.0)
+    with pytest.raises(ValueError, match="finite"):
+        insurer_reciprocity_metric(100.0, bad_val)
+    with pytest.raises(ValueError, match="finite"):
+        insurer_reciprocity_metric(100.0, 100.0, quota_1=bad_val)
+    with pytest.raises(ValueError, match="finite"):
+        insurer_reciprocity_metric(100.0, 100.0, correlation=bad_val)
+    with pytest.raises(ValueError, match="finite"):
+        insurer_reciprocity_metric(100.0, 100.0, expected_loss_1=bad_val, expected_loss_2=100.0)
 
 
 def test_stability_invalid_inputs() -> None:

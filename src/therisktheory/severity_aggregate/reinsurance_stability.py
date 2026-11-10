@@ -51,8 +51,8 @@ def technical_result_variance(
         NDArray[np.float64]: Retained technical result variance. NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If ``retention_rate`` is outside :math:`[0.0, 1.0]` or if moments
-            are negative.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), if ``retention_rate``
+            is outside :math:`[0.0, 1.0]`, or if moments are negative.
 
     Notes:
         Validation status: experimental.
@@ -80,6 +80,15 @@ def technical_result_variance(
     v_n = np.asarray(variance_frequency, dtype=np.float64)
     e_x = np.asarray(expected_severity, dtype=np.float64)
     v_x = np.asarray(variance_severity, dtype=np.float64)
+
+    if not (
+        np.all(np.isfinite(alpha))
+        and np.all(np.isfinite(e_n))
+        and np.all(np.isfinite(v_n))
+        and np.all(np.isfinite(e_x))
+        and np.all(np.isfinite(v_x))
+    ):
+        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
 
     if np.any((alpha < 0.0) | (alpha > 1.0)):
         raise ValueError("retention_rate must be between 0.0 and 1.0 inclusive")
@@ -142,8 +151,8 @@ def optimal_reinsurance(
         NDArray[np.float64]: Optimal retention proportion :math:`\alpha^* \in [0.0, 1.0]`.
 
     Raises:
-        ValueError: If inputs violate domain bounds or required parameters for the
-            chosen criterion are missing.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), violate domain
+            bounds, or if required parameters for the chosen criterion are missing.
 
     Notes:
         Validation status: experimental.
@@ -168,6 +177,9 @@ def optimal_reinsurance(
     v_s = np.asarray(variance_loss, dtype=np.float64)
     xi = np.asarray(reinsurer_loading, dtype=np.float64)
 
+    if not (np.all(np.isfinite(e_s)) and np.all(np.isfinite(v_s)) and np.all(np.isfinite(xi))):
+        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+
     if np.any(e_s <= 0.0):
         raise ValueError("expected_loss must be strictly positive")
     if np.any(v_s <= 0.0):
@@ -179,6 +191,8 @@ def optimal_reinsurance(
         if target_variance is None:
             raise ValueError("target_variance must be provided when criterion='target_variance'")
         v_tgt = np.asarray(target_variance, dtype=np.float64)
+        if not np.all(np.isfinite(v_tgt)):
+            raise ValueError("target_variance must contain only finite numbers")
         if np.any(v_tgt <= 0.0):
             raise ValueError("target_variance must be strictly positive")
         alpha_star = np.minimum(1.0, np.sqrt(v_tgt / v_s))
@@ -188,6 +202,8 @@ def optimal_reinsurance(
         if risk_aversion is None:
             raise ValueError("risk_aversion must be provided when criterion='mean_variance'")
         lam = np.asarray(risk_aversion, dtype=np.float64)
+        if not np.all(np.isfinite(lam)):
+            raise ValueError("risk_aversion must contain only finite numbers")
         if np.any(lam <= 0.0):
             raise ValueError("risk_aversion must be strictly positive")
         alpha_star = (lam * (1.0 + xi) * e_s) / (2.0 * v_s)
@@ -197,6 +213,8 @@ def optimal_reinsurance(
         if premium_budget is None:
             raise ValueError("premium_budget must be provided when criterion='premium_budget'")
         b = np.asarray(premium_budget, dtype=np.float64)
+        if not np.all(np.isfinite(b)):
+            raise ValueError("premium_budget must contain only finite numbers")
         if np.any(b < 0.0):
             raise ValueError("premium_budget must be non-negative")
         re_cost_full = (1.0 + xi) * e_s
@@ -262,8 +280,8 @@ def insurer_reciprocity_metric(
             - ``"quota_2"``: Balanced cession proportion for Insurer 2 (:math:`q_2`).
 
     Raises:
-        ValueError: If variances or expected losses are non-positive, :math:`q_1 \notin [0, 1]`,
-            or :math:`\rho \notin [-1, 1]`.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), variances or expected
+            losses are non-positive, :math:`q_1 \notin [0, 1]`, or :math:`\rho \notin [-1, 1]`.
 
     Notes:
         Validation status: experimental.
@@ -288,6 +306,14 @@ def insurer_reciprocity_metric(
     q1 = np.asarray(quota_1, dtype=np.float64)
     rho = np.asarray(correlation, dtype=np.float64)
 
+    if not (
+        np.all(np.isfinite(v1))
+        and np.all(np.isfinite(v2))
+        and np.all(np.isfinite(q1))
+        and np.all(np.isfinite(rho))
+    ):
+        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+
     if np.any(v1 <= 0.0) or np.any(v2 <= 0.0):
         raise ValueError("Portfolio variances must be strictly positive")
     if np.any((q1 < 0.0) | (q1 > 1.0)):
@@ -298,6 +324,8 @@ def insurer_reciprocity_metric(
     if expected_loss_1 is not None and expected_loss_2 is not None:
         e1 = np.asarray(expected_loss_1, dtype=np.float64)
         e2 = np.asarray(expected_loss_2, dtype=np.float64)
+        if not (np.all(np.isfinite(e1)) and np.all(np.isfinite(e2))):
+            raise ValueError("expected_loss must contain only finite numbers")
         if np.any(e1 <= 0.0) or np.any(e2 <= 0.0):
             raise ValueError("Expected losses must be strictly positive")
         q2 = q1 * (e1 / e2)

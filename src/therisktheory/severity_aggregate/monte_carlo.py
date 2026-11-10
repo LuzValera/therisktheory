@@ -36,7 +36,8 @@ def simulate_aggregate_loss(
 
     This implementation uses vectorization via :func:`numpy.bincount` and
     :func:`numpy.repeat` to aggregate all simulation trajectories without
-    row-by-row Python loops.
+    row-by-row Python loops. Both built-in parametric models and custom peer
+    generator callables adhering to course interface specifications are supported.
 
     Args:
         frequency_dist: Claim count distribution. Either a distribution name
@@ -65,7 +66,9 @@ def simulate_aggregate_loss(
 
     Raises:
         ValueError: If ``num_simulations < 1``, unrecognized distribution names,
-            or invalid distribution parameters.
+            non-finite or invalid parameters, or if custom generators return arrays
+            with invalid dimensions, negative values, non-finite values, or
+            non-integer frequency counts.
         TypeError: If parameter inputs are not dictionaries or callable where required.
 
     Notes:
@@ -93,8 +96,8 @@ def simulate_aggregate_loss(
         >>> np.isclose(np.mean(losses), 1000.0, rtol=0.10)
         True
     """
-    if num_simulations < 1:
-        raise ValueError(f"num_simulations must be >= 1, got {num_simulations}")
+    if not isinstance(num_simulations, (int, np.integer)) or num_simulations < 1:
+        raise ValueError(f"num_simulations must be an integer >= 1, got {num_simulations}")
 
     rng = (
         random_state
@@ -105,30 +108,43 @@ def simulate_aggregate_loss(
     # 1. Resolve Frequency Sampler
     f_params = frequency_params or {}
     if callable(frequency_dist):
-        n_claims = frequency_dist(num_simulations, rng)
+        raw_n_claims = frequency_dist(num_simulations, rng)
+        n_claims_arr = np.asarray(raw_n_claims)
+        if n_claims_arr.shape != (num_simulations,):
+            raise ValueError(
+                f"frequency generator must return a 1D array of shape ({num_simulations},), "
+                f"got shape {n_claims_arr.shape}"
+            )
+        if not np.all(np.isfinite(n_claims_arr)):
+            raise ValueError("frequency generator returned non-finite claim counts")
+        if np.any(n_claims_arr < 0):
+            raise ValueError("frequency generator returned negative claim counts")
+        if not np.issubdtype(n_claims_arr.dtype, np.integer) and not np.all(
+            np.floor(n_claims_arr) == n_claims_arr
+        ):
+            raise ValueError("frequency generator must return discrete integer claim counts")
+        n_claims = n_claims_arr.astype(np.int64)
     elif frequency_dist == "poisson":
         lam = float(f_params.get("lam", 1.0))
-        if lam <= 0.0:
-            raise ValueError(f"Poisson parameter 'lam' must be > 0, got {lam}")
+        if not np.isfinite(lam) or lam <= 0.0:
+            raise ValueError(f"Poisson parameter 'lam' must be finite and > 0, got {lam}")
         n_claims = rng.poisson(lam=lam, size=num_simulations)
     elif frequency_dist == "negative_binomial":
         n = float(f_params.get("n", 1.0))
         p = float(f_params.get("p", 0.5))
-        if n <= 0.0 or p <= 0.0 or p > 1.0:
-            raise ValueError(f"Negative Binomial requires n > 0 and 0 < p <= 1, got n={n}, p={p}")
+        if not (np.isfinite(n) and np.isfinite(p)) or n <= 0.0 or p <= 0.0 or p > 1.0:
+            raise ValueError(
+                f"Negative Binomial requires finite n > 0 and 0 < p <= 1, got n={n}, p={p}"
+            )
         n_claims = rng.negative_binomial(n=n, p=p, size=num_simulations)
     elif frequency_dist == "geometric":
         p = float(f_params.get("p", 0.5))
-        if p <= 0.0 or p > 1.0:
-            raise ValueError(f"Geometric requires 0 < p <= 1, got p={p}")
+        if not np.isfinite(p) or p <= 0.0 or p > 1.0:
+            raise ValueError(f"Geometric requires finite 0 < p <= 1, got p={p}")
         # NumPy geometric generates {1, 2, ...}, subtract 1 for number of claims in {0, 1, ...}
         n_claims = rng.geometric(p=p, size=num_simulations) - 1
     else:
         raise ValueError(f"Unsupported frequency distribution: {frequency_dist!r}")
-
-    n_claims = np.asarray(n_claims, dtype=np.int64)
-    if np.any(n_claims < 0):
-        raise ValueError("Frequency distribution generated negative claim counts")
 
     total_claims = int(np.sum(n_claims))
     if total_claims == 0:
@@ -137,49 +153,59 @@ def simulate_aggregate_loss(
     # 2. Resolve Severity Sampler
     s_params = severity_params or {}
     if callable(severity_dist):
-        severities = severity_dist(total_claims, rng)
+        raw_severities = severity_dist(total_claims, rng)
+        severities_arr = np.asarray(raw_severities, dtype=np.float64)
+        if severities_arr.shape != (total_claims,):
+            raise ValueError(
+                f"severity generator must return a 1D array of shape ({total_claims},), "
+                f"got shape {severities_arr.shape}"
+            )
+        if not np.all(np.isfinite(severities_arr)):
+            raise ValueError("severity generator returned non-finite claim amounts")
+        if np.any(severities_arr < 0.0):
+            raise ValueError("severity generator returned negative claim amounts")
+        severities = severities_arr
     elif severity_dist == "exponential":
         scale = float(s_params.get("scale", 1.0))
-        if scale <= 0.0:
-            raise ValueError(f"Exponential parameter 'scale' must be > 0, got {scale}")
+        if not np.isfinite(scale) or scale <= 0.0:
+            raise ValueError(f"Exponential parameter 'scale' must be finite and > 0, got {scale}")
         severities = rng.exponential(scale=scale, size=total_claims)
     elif severity_dist == "lognormal":
         mean = float(s_params.get("mean", 0.0))
         sigma = float(s_params.get("sigma", 1.0))
-        if sigma <= 0.0:
-            raise ValueError(f"Lognormal parameter 'sigma' must be > 0, got {sigma}")
+        if not (np.isfinite(mean) and np.isfinite(sigma)) or sigma <= 0.0:
+            raise ValueError(
+                "Lognormal parameters must be finite with sigma > 0, "
+                f"got mean={mean}, sigma={sigma}"
+            )
         severities = rng.lognormal(mean=mean, sigma=sigma, size=total_claims)
     elif severity_dist == "pareto":
         a = float(s_params.get("a", 2.0))
         scale = float(s_params.get("scale", 1.0))
-        if a <= 0.0 or scale <= 0.0:
+        if not (np.isfinite(a) and np.isfinite(scale)) or a <= 0.0 or scale <= 0.0:
             raise ValueError(
-                f"Pareto parameters 'a' and 'scale' must be > 0, got a={a}, scale={scale}"
+                "Pareto parameters 'a' and 'scale' must be finite and > 0, "
+                f"got a={a}, scale={scale}"
             )
         # NumPy pareto draws from Pareto Type II / Lomax shifted: (X + 1) * scale
         severities = (rng.pareto(a=a, size=total_claims) + 1.0) * scale
     elif severity_dist == "gamma":
         shape = float(s_params.get("shape", 1.0))
         scale = float(s_params.get("scale", 1.0))
-        if shape <= 0.0 or scale <= 0.0:
+        if not (np.isfinite(shape) and np.isfinite(scale)) or shape <= 0.0 or scale <= 0.0:
             raise ValueError(
-                f"Gamma 'shape' and 'scale' must be > 0, got shape={shape}, scale={scale}"
+                "Gamma 'shape' and 'scale' must be finite and > 0, "
+                f"got shape={shape}, scale={scale}"
             )
         severities = rng.gamma(shape=shape, scale=scale, size=total_claims)
     elif severity_dist == "weibull":
         a = float(s_params.get("a", 1.5))
         scale = float(s_params.get("scale", 1.0))
-        if a <= 0.0 or scale <= 0.0:
-            raise ValueError(
-                f"Weibull parameters 'a' and 'scale' must be > 0, got a={a}, scale={scale}"
-            )
+        if not (np.isfinite(a) and np.isfinite(scale)) or a <= 0.0 or scale <= 0.0:
+            raise ValueError(f"Weibull parameters must be finite and > 0, got a={a}, scale={scale}")
         severities = rng.weibull(a=a, size=total_claims) * scale
     else:
         raise ValueError(f"Unsupported severity distribution: {severity_dist!r}")
-
-    severities = np.asarray(severities, dtype=np.float64)
-    if np.any(severities < 0.0):
-        raise ValueError("Severity distribution generated negative claim values")
 
     # 3. Vectorized Path Aggregation
     # Assign each claim to its simulation index using np.repeat, then sum via np.bincount
