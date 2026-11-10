@@ -36,16 +36,17 @@ def quota_share(
             and ceded losses. NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If any loss value is negative or if retention rate is not in [0.0, 1.0].
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), or if any loss
+            value is negative, or if retention rate is not in [0.0, 1.0].
 
     Notes:
         Validation status: experimental.
 
     References:
         Kaas, R., Goovaerts, M., Dhaene, J., & Denuit, M. (2008). Modern Actuarial
-        Risk Theory: Using R (2nd ed.). Springer, Section 1.3.
-        Bowers, N. L., Gerber, H. U., Hickman, J. C., Jones, D. A., & Nesbitt, C. J.
-        (1997). Actuarial Mathematics (2nd ed.). Society of Actuaries, Chapter 14.
+        Risk Theory: Using R (2nd ed.). Springer, Chapter 1.
+        Bowers, N. L., et al. (1997). Actuarial Mathematics (2nd ed.). Society
+        of Actuaries, Chapter 14.
 
     Examples:
         >>> import numpy as np
@@ -60,6 +61,8 @@ def quota_share(
     loss_arr = np.asarray(losses, dtype=np.float64)
     alpha_arr = np.asarray(retention_rate, dtype=np.float64)
 
+    if not (np.all(np.isfinite(loss_arr)) and np.all(np.isfinite(alpha_arr))):
+        raise ValueError("losses and retention_rate must contain only finite numbers")
     if np.any(loss_arr < 0.0):
         raise ValueError("losses must be non-negative")
     if np.any((alpha_arr < 0.0) | (alpha_arr > 1.0)):
@@ -105,8 +108,8 @@ def surplus_share(
             A tuple ``(retained_losses, ceded_losses)``. NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If losses are negative, sum_insured <= 0, retention_line <= 0,
-            or max_lines < 0.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), or if losses are negative,
+            sum_insured <= 0, retention_line <= 0, or max_lines < 0.
 
     Notes:
         Validation status: experimental.
@@ -135,6 +138,12 @@ def surplus_share(
     line_arr = np.asarray(retention_line, dtype=np.float64)
     m_arr = np.asarray(max_lines, dtype=np.float64)
 
+    if not (
+        np.all(np.isfinite(loss_arr))
+        and np.all(np.isfinite(si_arr))
+        and np.all(np.isfinite(line_arr))
+    ):
+        raise ValueError("losses, sum_insured, and retention_line must be finite numbers")
     if np.any(loss_arr < 0.0):
         raise ValueError("losses must be non-negative")
     if np.any(si_arr <= 0.0):
@@ -185,7 +194,8 @@ def excess_of_loss(
             A tuple ``(retained_losses, ceded_losses)``. NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If losses or priority are negative, or if limit <= 0.
+        ValueError: If inputs contain non-finite numbers, or if losses or priority
+            are negative, or if limit <= 0.
 
     Notes:
         Validation status: experimental.
@@ -207,6 +217,8 @@ def excess_of_loss(
     loss_arr = np.asarray(losses, dtype=np.float64)
     p_arr = np.asarray(priority, dtype=np.float64)
 
+    if not (np.all(np.isfinite(loss_arr)) and np.all(np.isfinite(p_arr))):
+        raise ValueError("losses and priority must contain only finite numbers")
     if np.any(loss_arr < 0.0):
         raise ValueError("losses must be non-negative")
     if np.any(p_arr < 0.0):
@@ -216,6 +228,8 @@ def excess_of_loss(
 
     if limit is not None:
         lim_arr = np.asarray(limit, dtype=np.float64)
+        if not np.all(np.isfinite(lim_arr)):
+            raise ValueError("limit must contain only finite numbers")
         if np.any(lim_arr <= 0.0):
             raise ValueError("limit must be strictly positive")
         ceded = np.minimum(excess, lim_arr)
@@ -255,7 +269,8 @@ def stop_loss(
             A tuple ``(retained_losses, ceded_losses)``. NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If aggregate losses or deductible are negative, or if limit <= 0.
+        ValueError: If inputs contain non-finite numbers, or if aggregate losses
+            or deductible are negative, or if limit <= 0.
 
     Notes:
         Validation status: experimental.
@@ -278,6 +293,8 @@ def stop_loss(
     s_arr = np.asarray(aggregate_losses, dtype=np.float64)
     d_arr = np.asarray(deductible, dtype=np.float64)
 
+    if not (np.all(np.isfinite(s_arr)) and np.all(np.isfinite(d_arr))):
+        raise ValueError("aggregate_losses and deductible must contain only finite numbers")
     if np.any(s_arr < 0.0):
         raise ValueError("aggregate_losses must be non-negative")
     if np.any(d_arr < 0.0):
@@ -287,6 +304,8 @@ def stop_loss(
 
     if limit is not None:
         lim_arr = np.asarray(limit, dtype=np.float64)
+        if not np.all(np.isfinite(lim_arr)):
+            raise ValueError("limit must contain only finite numbers")
         if np.any(lim_arr <= 0.0):
             raise ValueError("limit must be strictly positive")
         ceded = np.minimum(excess, lim_arr)
@@ -329,7 +348,8 @@ def reinsured_solvent_position(
             - ``"deficit"`` (NDArray[np.float64]): Shortfall when insolvent (0.0 otherwise).
 
     Raises:
-        ValueError: If initial capital, retained premium, or retained losses are negative.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), or if initial capital,
+            retained premium, or retained losses are negative.
 
     Notes:
         Validation status: experimental.
@@ -357,6 +377,10 @@ def reinsured_solvent_position(
     p_arr = np.asarray(retained_premium, dtype=np.float64)
     l_arr = np.asarray(retained_losses, dtype=np.float64)
 
+    if not (
+        np.all(np.isfinite(u_arr)) and np.all(np.isfinite(p_arr)) and np.all(np.isfinite(l_arr))
+    ):
+        raise ValueError("inputs must contain only finite numbers")
     if np.any(u_arr < 0.0):
         raise ValueError("initial_capital must be non-negative")
     if np.any(p_arr < 0.0):

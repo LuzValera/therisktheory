@@ -254,3 +254,113 @@ def test_reinsured_solvent_position_invalid_inputs(
 ) -> None:
     with pytest.raises(ValueError):
         reinsured_solvent_position(capital, premium, losses)
+
+
+# ============================================================================
+# Joint Integration Tests with Bracamonte's pure_premium
+# ============================================================================
+
+
+def test_joint_integration_pure_premium_and_quota_share() -> None:
+    """Joint integration test: combining pure_premium (Bracamonte) with reinsurance (Valera).
+
+    Validates the end-to-end pricing and risk transfer chain:
+    frequency + severity -> pure premium -> quota share treaty -> solvent position.
+    """
+    from therisktheory.solvency_pricing import pure_premium
+
+    # 1. Collective risk decomposition
+    expected_frequency = np.array([10.0, 50.0, 100.0])
+    mean_claim_size = np.array([500.0, 200.0, 1000.0])
+
+    # Pure premium from Bracamonte's module: E[S] = E[N] * E[X]
+    expected_aggregate_loss = pure_premium(expected_frequency, mean_claim_size)
+    # Expected: [5000, 10000, 100000]
+    np.testing.assert_allclose(expected_aggregate_loss, np.array([5000.0, 10000.0, 100000.0]))
+
+    # 2. Risk transfer via quota share (Valera)
+    retention_rate = 0.70
+    retained_loss, ceded_loss = quota_share(expected_aggregate_loss, retention_rate=retention_rate)
+
+    # Conservation of expected risk
+    np.testing.assert_allclose(retained_loss + ceded_loss, expected_aggregate_loss)
+    np.testing.assert_allclose(retained_loss, 0.70 * expected_aggregate_loss)
+    np.testing.assert_allclose(ceded_loss, 0.30 * expected_aggregate_loss)
+
+    # 3. Solvency evaluation
+    # Insurer collects 15% loading, reinsurer charges 20% loading
+    insurer_premium = 1.15 * expected_aggregate_loss
+    reinsurance_cost = 0.30 * 1.20 * expected_aggregate_loss
+    net_retained_premium = insurer_premium - reinsurance_cost
+
+    solvency = reinsured_solvent_position(
+        initial_capital=5000.0,
+        retained_premium=net_retained_premium,
+        retained_losses=retained_loss,
+    )
+
+    # Check terminal surplus: u + P_ret - S_ret
+    expected_surplus = 5000.0 + net_retained_premium - retained_loss
+    np.testing.assert_allclose(solvency["net_surplus"], expected_surplus)
+    assert np.all(solvency["is_solvent"])
+
+
+def test_joint_integration_pure_premium_and_stop_loss() -> None:
+    """Joint integration test: pure_premium baseline combined with stop_loss treaty."""
+    from therisktheory.solvency_pricing import pure_premium
+
+    # Expected annual claims: 200 claims * $250 = $50,000 pure premium
+    base_pure_prem = float(pure_premium(200.0, 250.0).item())
+    assert base_pure_prem == pytest.approx(50000.0)
+
+    # Realized loss scenarios around the pure premium
+    realized_scenarios = np.array([35000.0, 50000.0, 65000.0, 100000.0])
+
+    # Stop loss attaches at pure premium level (deductible = E[S]) with limit 30000
+    ret_loss, ced_loss = stop_loss(realized_scenarios, deductible=base_pure_prem, limit=30000.0)
+
+    # At $35k: ceded = 0, retained = 35k
+    # At $50k: ceded = 0, retained = 50k
+    # At $65k: ceded = 15k, retained = 50k
+    # At $100k: ceded = 30k (capped), retained = 70k
+    np.testing.assert_allclose(ced_loss, np.array([0.0, 0.0, 15000.0, 30000.0]))
+    np.testing.assert_allclose(ret_loss, np.array([35000.0, 50000.0, 50000.0, 70000.0]))
+    np.testing.assert_allclose(ret_loss + ced_loss, realized_scenarios)
+
+
+@pytest.mark.parametrize(
+    "invalid_val",
+    [np.nan, np.inf, -np.inf],
+)
+def test_reinsurance_rejects_non_finite_inputs(invalid_val: float) -> None:
+    """Verify that all reinsurance treaty functions reject NaN, +Inf, -Inf."""
+    with pytest.raises(ValueError):
+        quota_share(invalid_val, 0.5)
+    with pytest.raises(ValueError):
+        quota_share(100.0, invalid_val)
+
+    with pytest.raises(ValueError):
+        surplus_share(invalid_val, 1000.0, 500.0)
+    with pytest.raises(ValueError):
+        surplus_share(100.0, invalid_val, 500.0)
+
+    with pytest.raises(ValueError):
+        excess_of_loss(invalid_val, 100.0)
+    with pytest.raises(ValueError):
+        excess_of_loss(100.0, invalid_val)
+    with pytest.raises(ValueError):
+        excess_of_loss(100.0, 50.0, limit=invalid_val)
+
+    with pytest.raises(ValueError):
+        stop_loss(invalid_val, 100.0)
+    with pytest.raises(ValueError):
+        stop_loss(100.0, invalid_val)
+    with pytest.raises(ValueError):
+        stop_loss(100.0, 50.0, limit=invalid_val)
+
+    with pytest.raises(ValueError):
+        reinsured_solvent_position(invalid_val, 100.0, 50.0)
+    with pytest.raises(ValueError):
+        reinsured_solvent_position(100.0, invalid_val, 50.0)
+    with pytest.raises(ValueError):
+        reinsured_solvent_position(100.0, 100.0, invalid_val)
