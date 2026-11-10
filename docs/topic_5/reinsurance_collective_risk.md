@@ -112,11 +112,15 @@ Canceling $r > 0$ yields the exact closed-form adjustment coefficient:
 
 $$R(\alpha) = \frac{\beta}{\alpha} \cdot \frac{c_{\text{ret}} - \lambda \alpha \mu_1}{c_{\text{ret}}} = \frac{\beta}{\alpha} \cdot \frac{\theta_{\text{ret}}(\alpha)}{1 + \theta_{\text{ret}}(\alpha)}$$
 
-Expressing in terms of market loadings:
+Expressing in terms of market loadings and the retention proportion $\alpha$:
 
-$$R(\alpha) = \frac{\beta [\theta - \xi(1 - \alpha)]}{\alpha + \theta - \xi(1 - \alpha)}$$
+$$R(\alpha) = \frac{\beta [\theta - \xi(1 - \alpha)]}{\alpha [\alpha + \theta - \xi(1 - \alpha)]}$$
 
-When $\alpha \le \alpha_{\min}$, net drift is non-positive and $R(\alpha) = 0.0$.
+When $\alpha = 1$ (gross position, no reinsurance), $R(1) = \frac{\beta \theta}{1 + \theta}$, coinciding with classical Cramér-Lundberg theory. When $\alpha \le \alpha_{\min}$, net drift is non-positive and $R(\alpha) = 0.0$.
+
+Substituting $R(\alpha)$ back into Lundberg's fundamental equation yields an exact residual of zero:
+
+$$\lambda \left( m_{\alpha X}(R(\alpha)) - 1 \right) - c_{\text{ret}} R(\alpha) \equiv 0$$
 
 ### 2. Numerical Root-Finding for Excess-of-Loss Reinsurance
 
@@ -146,7 +150,7 @@ $$\frac{d R}{d \alpha} = \frac{\beta \left[ \xi(\alpha + \theta - \xi(1 - \alpha
 - **Case 1 ($\xi \le \theta$):** The reinsurer is cheaper or equal to direct premium loading. The derivative is non-positive for all $\alpha \in [0, 1]$. The optimal retention is full ceding down to the lowest permissible level.
 - **Case 2 ($\xi > \theta$):** The reinsurer is more expensive. Setting $d R / d \alpha = 0$ yields the interior stationary point:
   $$\alpha^* = \frac{2 \xi - \theta}{\xi(1 + \xi)} \quad (\text{subject to } \alpha^* \in [\alpha_{\min}, 1.0])$$
-  Our implementation optimizes this profile numerically via `scipy.optimize.minimize_scalar` within the bounded interval $[\alpha_{\min} + 10^{-6}, 1.0]$.
+  Our implementation optimizes this profile numerically via `scipy.optimize.minimize_scalar` within the robust bounded interval $[\alpha_{\min} + 10^{-4}(1 - \alpha_{\min}), 1.0]$, ensuring a strictly non-empty, well-posed search interval even when $\alpha_{\min} \to 1.0^-$.
 
 ---
 

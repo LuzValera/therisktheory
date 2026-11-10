@@ -103,6 +103,24 @@ def run_topic_5_demo() -> None:
     for a_val, r_val in zip(retention_grid, r_coefficients, strict=False):
         print(f"  Retention alpha = {a_val:.2f}  -->  Adjustment Coeff R = {r_val:.5f}")
 
+    # Exact Lundberg equation residue check (Prof. Pitta's verification case)
+    r_check = float(
+        np.asarray(
+            reinsurance_adjustment_coefficient(
+                claim_rate=1.0,
+                claim_mean=1.0,
+                safety_loading=0.20,
+                reinsurer_loading=0.30,
+                retention_param=0.70,
+                treaty_type="proportional",
+            )
+        ).item()
+    )
+    c_ret_check = 1.0 * (0.70 + 0.20 - 0.30 * 0.30)
+    mgf_check = 1.0 / (1.0 - 0.70 * r_check)
+    residue_check = 1.0 * (mgf_check - 1.0) - c_ret_check * r_check
+    print(f"\n  [Residue check at alpha=0.70]: R = {r_check:.9f}, Residue = {residue_check:.2e}")
+
     # ------------------------------------------------------------------------
     # 4. Optimal Reinsurance Retention (Excess of Loss and Proportional)
     # ------------------------------------------------------------------------

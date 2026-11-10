@@ -353,7 +353,7 @@ def reinsurance_adjustment_coefficient(
 
        .. math::
            R(\alpha) = \frac{\beta}{\alpha} \frac{\theta_{\text{ret}}}{1 + \theta_{\text{ret}}}
-           = \frac{\beta [\theta - \xi(1 - \alpha)]}{\alpha + \theta - \xi(1 - \alpha)}
+           = \frac{\beta [\theta - \xi(1 - \alpha)]}{\alpha [\alpha + \theta - \xi(1 - \alpha)]}
 
        If :math:`\theta_{\text{ret}}(\alpha) \le 0` (net non-positive drift), :math:`R = 0.0`.
 
@@ -438,13 +438,14 @@ def reinsurance_adjustment_coefficient(
         if np.any((param < 0.0) | (param > 1.0)):
             raise ValueError("retention_param (alpha) must be between 0.0 and 1.0 inclusive")
 
-        # Closed form: R(alpha) = beta * (theta - xi*(1 - alpha)) / (alpha + theta - xi*(1 - alpha))
+        # Closed form: R(a) = beta * [theta - xi*(1 - a)] / (a * [a + theta - xi*(1 - a)])
         num = beta * (theta - xi * (1.0 - param))
-        den = param + theta - xi * (1.0 - param)
+        drift_factor = param + theta - xi * (1.0 - param)
+        den = param * drift_factor
 
         with np.errstate(divide="ignore", invalid="ignore"):
             r_val = np.where(
-                (param <= 0.0) | (num <= 0.0) | (den <= 0.0),
+                (param <= 0.0) | (num <= 0.0) | (drift_factor <= 0.0),
                 0.0,
                 num / den,
             )
@@ -577,8 +578,9 @@ def optimal_reinsurance_retention(
     r_gross = float((beta * safety_loading) / (1.0 + safety_loading))
 
     if treaty_type == "proportional":
-        alpha_min = max(0.0, 1.0 - (safety_loading / reinsurer_loading))
-        lower_bound = alpha_min + 1e-4
+        alpha_min = max(0.0, min(1.0 - 1e-12, 1.0 - (safety_loading / reinsurer_loading)))
+        width = 1.0 - alpha_min
+        lower_bound = alpha_min + 1e-4 * width
 
         def neg_r(alpha_val: float) -> float:
             r = reinsurance_adjustment_coefficient(
@@ -891,9 +893,12 @@ def reinsurance_capital_relief(
     if np.any(th_ret <= 0.0):
         raise ValueError("retention_rate violates net profit condition (theta_ret <= 0)")
 
-    beta = 1.0 / mu1
-    r_gross = (beta * theta) / (1.0 + theta)
-    r_ret = (beta / alpha) * (th_ret / (1.0 + th_ret))
+    r_ret = reinsurance_adjustment_coefficient(
+        lam, mu1, theta, xi, alpha, treaty_type="proportional"
+    )
+    r_gross = reinsurance_adjustment_coefficient(
+        lam, mu1, theta, xi, np.ones_like(alpha), treaty_type="proportional"
+    )
 
     u_gross = np.maximum(0.0, (1.0 / r_gross) * np.log(1.0 / ((1.0 + theta) * eps)))
     u_ret = np.maximum(0.0, (1.0 / r_ret) * np.log(1.0 / ((1.0 + th_ret) * eps)))
@@ -982,8 +987,9 @@ def compare_de_finetti_lundberg_retention(
     ):
         raise ValueError("All parameters must be strictly positive")
 
-    alpha_min = max(0.0, 1.0 - (safety_loading / reinsurer_loading))
-    low_bound = alpha_min + 1e-4
+    alpha_min = max(0.0, min(1.0 - 1e-12, 1.0 - (safety_loading / reinsurer_loading)))
+    width = 1.0 - alpha_min
+    low_bound = alpha_min + 1e-4 * width
 
     # 1. De Finetti optimum: maximize safety index
     mu2 = claim_variance + (claim_mean**2)

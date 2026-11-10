@@ -132,6 +132,20 @@ def test_reinsurance_adjustment_coefficient_proportional() -> None:
     )
     assert np.asarray(r_gross).item() == pytest.approx(1.0 / 6.0)
 
+    # At alpha = 0.70 (Prof. Pitta's observation case):
+    # num = 1.0 * (0.20 - 0.30*(1 - 0.70)) = 0.11
+    # den = 0.70 * (0.70 + 0.20 - 0.30*(1 - 0.70)) = 0.70 * 0.81 = 0.567
+    # R = 0.11 / 0.567 ~ 0.194003527
+    r_07 = reinsurance_adjustment_coefficient(
+        claim_rate=1.0,
+        claim_mean=1.0,
+        safety_loading=0.20,
+        reinsurer_loading=0.30,
+        retention_param=0.70,
+        treaty_type="proportional",
+    )
+    assert np.asarray(r_07).item() == pytest.approx(0.19400352733686066)
+
     # At alpha = 0.8:
     r_08 = reinsurance_adjustment_coefficient(
         claim_rate=1.0,
@@ -141,7 +155,7 @@ def test_reinsurance_adjustment_coefficient_proportional() -> None:
         retention_param=0.80,
         treaty_type="proportional",
     )
-    assert np.asarray(r_08).item() == pytest.approx(0.14 / 0.94)
+    assert np.asarray(r_08).item() == pytest.approx(0.14 / (0.80 * 0.94))
 
     # Insolvent retention alpha <= alpha_min (alpha = 0.20 < 1/3) -> R = 0.0
     r_insolvent = reinsurance_adjustment_coefficient(
@@ -538,3 +552,101 @@ def test_collective_reinsurance_domain_errors() -> None:
         compare_de_finetti_lundberg_retention(10.0, 100.0, 0.20, -0.35)
     with pytest.raises(ValueError, match="strictly positive"):
         compare_de_finetti_lundberg_retention(10.0, 100.0, 0.20, 0.35, claim_rate=-1.0)
+
+
+# ============================================================================
+# Tests verifying exact root substitution into original Lundberg equation
+# ============================================================================
+
+
+def test_lundberg_equation_residues_proportional() -> None:
+    """Verify that root R yields residue zero in the original Lundberg equation."""
+    test_cases = [
+        # (claim_rate, claim_mean, safety_loading, reinsurer_loading, alpha)
+        (1.0, 1.0, 0.20, 0.30, 0.70),  # Prof. Pitta's observation case
+        (5.0, 2.0, 0.15, 0.25, 0.60),
+        (10.0, 50.0, 0.30, 0.40, 0.85),
+        (2.0, 0.5, 0.10, 0.12, 0.95),
+    ]
+
+    for lam, mu1, theta, xi, alpha in test_cases:
+        r_val = float(
+            np.asarray(
+                reinsurance_adjustment_coefficient(
+                    claim_rate=lam,
+                    claim_mean=mu1,
+                    safety_loading=theta,
+                    reinsurer_loading=xi,
+                    retention_param=alpha,
+                    treaty_type="proportional",
+                )
+            ).item()
+        )
+        assert r_val > 0.0
+
+        # Lundberg fundamental equation: lambda * (m_Xret(R) - 1) - c_ret * R = 0
+        beta = 1.0 / mu1
+        c_ret = (1.0 + theta) * lam * mu1 - (1.0 + xi) * lam * (1.0 - alpha) * mu1
+        # X_ret = alpha * X ~ Exp(beta / alpha)
+        mgf = beta / (beta - alpha * r_val)
+        residue = lam * (mgf - 1.0) - c_ret * r_val
+        assert residue == pytest.approx(0.0, abs=1e-12)
+
+
+def test_lundberg_equation_residues_excess_of_loss() -> None:
+    """Verify that numerical XL root R yields residue zero in Lundberg equation."""
+    test_cases = [
+        # (claim_rate, claim_mean, safety_loading, reinsurer_loading, priority)
+        (10.0, 1.0, 0.20, 0.25, 5.0),
+        (5.0, 2.0, 0.25, 0.30, 3.0),
+        (2.0, 10.0, 0.15, 0.20, 25.0),
+    ]
+
+    for lam, mu1, theta, xi, priority in test_cases:
+        r_val = float(
+            np.asarray(
+                reinsurance_adjustment_coefficient(
+                    claim_rate=lam,
+                    claim_mean=mu1,
+                    safety_loading=theta,
+                    reinsurer_loading=xi,
+                    retention_param=priority,
+                    treaty_type="excess_of_loss",
+                )
+            ).item()
+        )
+        assert r_val > 0.0
+
+        beta = 1.0 / mu1
+        mu1_ced = mu1 * np.exp(-beta * priority)
+        c_ret = (1.0 + theta) * lam * mu1 - (1.0 + xi) * lam * mu1_ced
+        residue = _excess_of_loss_lundberg_equation(r_val, beta, priority, lam, c_ret)
+        assert residue == pytest.approx(0.0, abs=1e-10)
+
+
+def test_optimal_reinsurance_retention_narrow_domain() -> None:
+    """Verify optimal retention when alpha_min is very close to 1.0 (Prof. Pitta's test)."""
+    # Prof. Pitta's observation case: optimal_reinsurance_retention(1, 1, 0.00005, 1)
+    # alpha_min = 1 - 0.00005 / 1.0 = 0.99995. Admissible interval is (0.99995, 1.0]
+    opt = optimal_reinsurance_retention(
+        claim_rate=1.0,
+        claim_mean=1.0,
+        safety_loading=0.00005,
+        reinsurer_loading=1.0,
+        treaty_type="proportional",
+    )
+    alpha_star = opt["optimal_retention"]
+    assert opt["minimum_viable_retention"] < alpha_star <= 1.0
+    assert opt["optimal_adjustment_coefficient"] > 0.0
+    assert opt["retained_safety_loading"] > 0.0
+
+    # Test compare_de_finetti_lundberg_retention with the same narrow domain
+    comp = compare_de_finetti_lundberg_retention(
+        claim_mean=1.0,
+        claim_variance=1.0,
+        safety_loading=0.00005,
+        reinsurer_loading=1.0,
+        claim_rate=1.0,
+    )
+    assert opt["minimum_viable_retention"] < comp["de_finetti_optimal_retention"] <= 1.0
+    assert opt["minimum_viable_retention"] < comp["lundberg_optimal_retention"] <= 1.0
