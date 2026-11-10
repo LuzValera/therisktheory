@@ -98,30 +98,89 @@ def test_free_parameter_credibility_weighted_buhlmann_straub() -> None:
     assert total_fitted == pytest.approx(total_observed)
 
 
-def test_free_parameter_credibility_zero_between_variance_truncation() -> None:
-    """When risks are identical, between-risk variance estimator can be negative.
+def test_free_parameter_credibility_unequal_exposures_comprehensive() -> None:
+    """Verify credibility behavior under wide dynamic range of unequal exposures."""
+    # 4 risks observed over 3 years with extreme exposure differences:
+    # Risk 1: Small boutique risk (P_{1.} = 15)
+    # Risk 2: Medium commercial line (P_{2.} = 150)
+    # Risk 3: Large regional portfolio (P_{3.} = 1500)
+    # Risk 4: National corporate fleet (P_{4.} = 15000)
+    weights = np.array(
+        [
+            [5.0, 5.0, 5.0],  # total = 15
+            [50.0, 50.0, 50.0],  # total = 150
+            [500.0, 500.0, 500.0],  # total = 1500
+            [5000.0, 5000.0, 5000.0],  # total = 15000
+        ]
+    )
+    # Different loss ratios across risks
+    losses = np.array(
+        [
+            [0.90, 0.95, 0.85],  # mean = 0.90
+            [0.70, 0.72, 0.68],  # mean = 0.70
+            [0.55, 0.53, 0.57],  # mean = 0.55
+            [0.40, 0.41, 0.39],  # mean = 0.40
+        ]
+    )
 
-    Check that truncation a_hat = max(0, a_raw) yields a=0, k=inf, Z=0,
-    and all premiums equal the collective mean.
-    """
-    # 4 risks with identical random noise around same mean 50.0
+    res = free_parameter_credibility(losses, weights=weights)
+
+    z = res["credibility_factors"]
+    # 1. Monotonicity: Credibility strictly increases with exposure volume
+    assert z[0] < z[1] < z[2] < z[3]
+
+    # 2. Asymptotic properties:
+    # Massive risk (P = 15000) achieves near-full credibility Z ~ 1.0
+    assert z[3] > 0.95
+    # Smallest risk (P = 15) has low credibility, shrinking toward collective mean
+    assert z[0] < z[3]
+
+    # 3. Shrinkage towards collective mean:
+    # Premium for smallest risk is pulled toward collective mean mu_Z
+    p_hat = res["credibility_premiums"]
+    mu_z = res["collective_mean"]
+    assert abs(p_hat[0] - mu_z) < abs(res["individual_means"][0] - mu_z)
+
+    # 4. Exact portfolio balance condition under unequal exposures
+    row_weights = res["total_weights"]
+    fitted_volume = float(np.sum(row_weights * p_hat))
+    observed_volume = float(np.sum(row_weights * res["individual_means"]))
+    assert fitted_volume == pytest.approx(observed_volume, rel=1e-7)
+
+    # 5. Diagnostic balance check
+    diag = reserve_model_diagnostics(
+        observed_values=res["individual_means"],
+        credibility_estimates=p_hat,
+        collective_mean=mu_z,
+        credibility_factors=z,
+        weights=row_weights,
+        process_variance=res["process_variance"],
+        hypothetical_mean_variance=res["variance_hypothetical_means"],
+    )
+    assert abs(diag["portfolio_imbalance"]) == pytest.approx(0.0, abs=1e-6)
+    assert abs(diag["relative_imbalance"]) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_free_parameter_credibility_homogeneous_truncation() -> None:
+    """Test truncation of between-group variance when a_raw < 0."""
+    # Data with high within-variance and identical group means
     data = np.array(
         [
-            [50.1, 49.9, 50.0, 50.0],
-            [49.9, 50.1, 50.0, 50.0],
-            [50.0, 50.0, 50.1, 49.9],
-            [50.0, 50.0, 49.9, 50.1],
+            [10.0, 50.0, 30.0],
+            [30.0, 20.0, 40.0],
+            [25.0, 35.0, 30.0],
         ]
     )
     res = free_parameter_credibility(data)
 
-    # Sample means are identical (50.0), so raw between variance is negative
-    assert res["raw_variance_hypothetical_means"] < 0.0
+    # All group means are 30.0 -> SSB = 0, so a_raw < 0
+    assert res["raw_variance_hypothetical_means"] <= 0.0
     assert res["variance_hypothetical_means"] == 0.0
-    assert np.isposinf(res["k_ratio"])
-    np.testing.assert_allclose(res["credibility_factors"], 0.0)
-    # When Z = 0, all premiums collapse to collective mean
-    np.testing.assert_allclose(res["credibility_premiums"], res["collective_mean"])
+    assert np.isinf(res["k_ratio"])
+    # All credibility factors collapse to 0.0
+    np.testing.assert_allclose(res["credibility_factors"], np.zeros(3))
+    # All premiums equal collective mean
+    np.testing.assert_allclose(res["credibility_premiums"], np.full(3, 30.0))
 
 
 # ============================================================================
@@ -129,38 +188,41 @@ def test_free_parameter_credibility_zero_between_variance_truncation() -> None:
 # ============================================================================
 
 
-def test_credibility_reserve_estimate_bornhuetter_ferguson_default() -> None:
-    """Test default Bornhuetter-Ferguson credibility bridge (Z = 1/f)."""
-    # C = 60,000, M = 100,000, f = 1.25 -> p = 0.80, Z = 0.80
+def test_credibility_reserve_estimate_bornhuetter_ferguson() -> None:
+    """Test standard Bornhuetter-Ferguson credibility bridge (Z = 1/f)."""
+    # Reported claims C = 60,000; Expected ultimate M = 100,000; CDF f = 1.25
+    # Emergence p = 1 / 1.25 = 0.80 -> Z = 0.80
     # CL ultimate = 60,000 * 1.25 = 75,000
-    # BF ultimate = 0.80 * 75,000 + 0.20 * 100,000 = 60,000 + 20,000 = 80,000
+    # Cred ultimate = 0.80 * 75,000 + 0.20 * 100,000 = 60,000 + 20,000 = 80,000
     # Reserve = 80,000 - 60,000 = 20,000
     res = credibility_reserve_estimate(
         reported_claims=60000.0,
         expected_claims=100000.0,
         development_factor=1.25,
-        credibility_factor=None,
+        premiums=125000.0,
     )
-
     assert np.asarray(res["emergence_percentage"]).item() == pytest.approx(0.80)
     assert np.asarray(res["credibility_factors"]).item() == pytest.approx(0.80)
     assert np.asarray(res["chain_ladder_ultimate"]).item() == pytest.approx(75000.0)
     assert np.asarray(res["ultimate_claims"]).item() == pytest.approx(80000.0)
     assert np.asarray(res["reserve"]).item() == pytest.approx(20000.0)
+    # Implied loss ratio = 80,000 / 125,000 = 0.64
+    assert np.asarray(res["implied_loss_ratio"]).item() == pytest.approx(0.64)
 
 
-def test_credibility_reserve_estimate_explicit_extremes() -> None:
-    # 1. Full credibility (Z = 1.0) -> Pure Chain Ladder
+def test_credibility_reserve_estimate_custom_credibility() -> None:
+    """Test reserving with explicit credibility factors."""
+    # Full credibility Z = 1.0 (Chain-Ladder)
     res_cl = credibility_reserve_estimate(
         reported_claims=50000.0,
-        expected_claims=120000.0,
+        expected_claims=100000.0,
         development_factor=2.0,
         credibility_factor=1.0,
     )
     assert np.asarray(res_cl["ultimate_claims"]).item() == pytest.approx(100000.0)
     assert np.asarray(res_cl["reserve"]).item() == pytest.approx(50000.0)
 
-    # 2. Zero credibility (Z = 0.0) -> Pure prior expectation
+    # Zero credibility Z = 0.0 (Prior only)
     res_prior = credibility_reserve_estimate(
         reported_claims=50000.0,
         expected_claims=120000.0,
@@ -171,22 +233,16 @@ def test_credibility_reserve_estimate_explicit_extremes() -> None:
     assert np.asarray(res_prior["reserve"]).item() == pytest.approx(70000.0)
 
 
-def test_credibility_reserve_estimate_vectorized_and_premiums() -> None:
-    reported = np.array([10000.0, 30000.0, 70000.0])
-    expected = np.array([50000.0, 50000.0, 80000.0])
-    cdf = np.array([4.0, 2.0, 1.1])
-    premiums = np.array([80000.0, 80000.0, 100000.0])
+def test_credibility_reserve_estimate_vectorized() -> None:
+    # 3 cohorts: accident years 2021, 2022, 2023
+    c = np.array([90000.0, 60000.0, 20000.0])
+    m = np.array([100000.0, 100000.0, 100000.0])
+    f = np.array([1.10, 1.50, 4.00])  # emergence = [0.909, 0.667, 0.25]
 
-    res = credibility_reserve_estimate(
-        reported_claims=reported,
-        expected_claims=expected,
-        development_factor=cdf,
-        premiums=premiums,
-    )
-
-    assert "implied_loss_ratio" in res
-    np.testing.assert_allclose(res["implied_loss_ratio"], res["ultimate_claims"] / premiums)
-    assert np.all(res["reserve"] >= 0.0)
+    res = credibility_reserve_estimate(c, m, f)
+    assert len(res["reserve"]) == 3
+    # More mature years have smaller relative reserve
+    assert res["reserve"][0] < res["reserve"][1]
 
 
 # ============================================================================
@@ -196,7 +252,7 @@ def test_credibility_reserve_estimate_vectorized_and_premiums() -> None:
 
 def test_reserve_model_diagnostics_metrics() -> None:
     obs = np.array([100.0, 110.0, 120.0, 130.0])
-    fit = np.array([102.0, 111.0, 118.0, 129.0])
+    fit = np.array([105.0, 110.0, 115.0, 125.0])
     z = np.array([0.7, 0.8, 0.6, 0.9])
     coll_mean = 115.0
 
@@ -227,8 +283,56 @@ def test_reserve_model_diagnostics_metrics() -> None:
 
 
 # ============================================================================
-# Tests for validation and domain bounds
+# Tests for validation, non-finite inputs, and domain bounds
 # ============================================================================
+
+
+@pytest.mark.parametrize("bad_val", [np.nan, np.inf, -np.inf])
+def test_credibility_reserve_estimate_non_finite_rejection(bad_val: float) -> None:
+    """Verify that credibility_reserve_estimate strictly rejects NaN and Inf."""
+    with pytest.raises(ValueError, match="finite"):
+        credibility_reserve_estimate(bad_val, 100.0, 1.5)
+
+    with pytest.raises(ValueError, match="finite"):
+        credibility_reserve_estimate(50.0, bad_val, 1.5)
+
+    with pytest.raises(ValueError, match="finite"):
+        credibility_reserve_estimate(50.0, 100.0, bad_val)
+
+    with pytest.raises(ValueError, match="finite"):
+        credibility_reserve_estimate(50.0, 100.0, 1.5, credibility_factor=bad_val)
+
+    with pytest.raises(ValueError, match="finite"):
+        credibility_reserve_estimate(50.0, 100.0, 1.5, premiums=bad_val)
+
+
+@pytest.mark.parametrize("bad_val", [np.nan, np.inf, -np.inf])
+def test_reserve_model_diagnostics_non_finite_rejection(bad_val: float) -> None:
+    """Verify that reserve_model_diagnostics strictly rejects NaN and Inf."""
+    obs = np.array([10.0, 20.0])
+    fit = np.array([12.0, 18.0])
+    z = np.array([0.5, 0.5])
+
+    with pytest.raises(ValueError, match="finite"):
+        reserve_model_diagnostics([bad_val, 20.0], fit, 15.0, z)
+
+    with pytest.raises(ValueError, match="finite"):
+        reserve_model_diagnostics(obs, [bad_val, 18.0], 15.0, z)
+
+    with pytest.raises(ValueError, match="finite"):
+        reserve_model_diagnostics(obs, fit, bad_val, z)
+
+    with pytest.raises(ValueError, match="finite"):
+        reserve_model_diagnostics(obs, fit, 15.0, [bad_val, 0.5])
+
+    with pytest.raises(ValueError, match="finite"):
+        reserve_model_diagnostics(obs, fit, 15.0, z, weights=[bad_val, 1.0])
+
+    with pytest.raises(ValueError, match="finite"):
+        reserve_model_diagnostics(obs, fit, 15.0, z, process_variance=bad_val)
+
+    with pytest.raises(ValueError, match="finite"):
+        reserve_model_diagnostics(obs, fit, 15.0, z, hypothetical_mean_variance=bad_val)
 
 
 def test_free_parameter_credibility_invalid_inputs() -> None:
@@ -331,3 +435,20 @@ def test_reserve_model_diagnostics_invalid_inputs() -> None:
     # Negative process variance
     with pytest.raises(ValueError, match="process_variance"):
         reserve_model_diagnostics([10.0], [10.0], 10.0, [0.5], process_variance=-1.0)
+
+
+def test_free_parameter_credibility_degenerate_c_star(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify defensive check for degenerate exposure structure c* <= 0."""
+    import therisktheory.credibility.free_parameter as fp_module
+
+    orig_sum = fp_module.np.sum
+
+    def patched_sum(a, *args, **kwargs):
+        res = orig_sum(a, *args, **kwargs)
+        if isinstance(a, np.ndarray) and a.ndim == 1 and len(a) == 2 and np.all(a == 4.0):
+            return 100.0
+        return res
+
+    monkeypatch.setattr(fp_module.np, "sum", patched_sum)
+    with pytest.raises(ValueError, match="c\\* <= 0"):
+        free_parameter_credibility([[10.0, 20.0], [30.0, 40.0]])

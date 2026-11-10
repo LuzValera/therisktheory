@@ -94,6 +94,9 @@ For an accident cohort $j$:
 #### The Credibility Reserving Formula
 $$\widehat{U}_{\text{cred}, j} = Z_j \widehat{U}_{\text{CL}, j} + (1 - Z_j) M_j = Z_j (C_j \cdot f_j) + (1 - Z_j) M_j$$
 
+The outstanding claim reserve is given by:
+$$\widehat{R}_{\text{cred}, j} = \max\left(0, \widehat{U}_{\text{cred}, j} - C_j\right)$$
+
 #### Structural Special Cases
 1. **Full Credibility ($Z_j = 1.0$):**
    Pure Chain-Ladder (Development) method: $\widehat{U} = C_j f_j$, Reserve $= C_j (f_j - 1)$.
@@ -107,12 +110,49 @@ $$\widehat{U}_{\text{cred}, j} = Z_j \widehat{U}_{\text{CL}, j} + (1 - Z_j) M_j 
 
 ---
 
-### 4. Statistical Model Diagnostics
+### 4. Coordination with the Bayesian Credibility Module (Topic 4 Integration)
+
+The `therisktheory.credibility` package encompasses two coordinated and complementary credibility paradigms:
+
+| Paradigm | Module / Component | Prior Requirement | Parameter Source | Optimization Criterion |
+|---|---|---|---|---|
+| **Parametric Bayesian Credibility** | `therisktheory.credibility` (Perez / Topic 4) | Explicit conjugate family (e.g. Gamma prior for Poisson parameter $\Lambda$) | Specified apriori $(\alpha, \beta)$ from industry data or expert opinion | Minimum MSE under posterior conditional expectation $\mathbb{E}[\Lambda \mid \mathbf{X}]$ |
+| **Non-Parametric Empirical Bayes** | `free_parameter_credibility` (Valera / Topic 4) | No distributional assumptions for $U(\theta)$ or $f(x \mid \theta)$ | Estimated directly from longitudinal portfolio data $(\widehat{s}^2, \widehat{a})$ | Best linear unbiased predictor (BLUP) in the Hilbert space of linear estimators |
+
+#### Theoretical Equivalence & Asymptotic Convergence
+When the underlying risk process strictly satisfies a Poisson-Gamma conjugate model with $\Lambda_i \sim \text{Gamma}(\alpha, \beta)$ and $X_{it} \mid \Lambda_i \sim \text{Poisson}(\Lambda_i)$:
+1. The theoretical structural parameters are:
+   $$\mu = \frac{\alpha}{\beta}, \quad s^2 = \mathbb{E}[\Lambda] = \frac{\alpha}{\beta}, \quad a = \text{Var}(\Lambda) = \frac{\alpha}{\beta^2}$$
+2. The Bühlmann ratio reduces exactly to the Bayesian Gamma shape parameter:
+   $$k = \frac{s^2}{a} = \frac{\alpha / \beta}{\alpha / \beta^2} = \beta$$
+3. The empirical Bayes credibility factor $Z = \frac{n}{n + k} = \frac{n}{n + \beta}$ matches the exact Bayesian posterior mean credibility weight.
+4. As the number of observed risks $I \to \infty$ and periods $T \to \infty$, the non-parametric estimators $(\widehat{s}^2, \widehat{a})$ converge almost surely to the true prior parameters, demonstrating that the empirical Bayes module acts as the objective, data-driven counterpart to the parametric Bayesian module.
+
+---
+
+### 5. Mathematical Validation of the Loss Reserve Estimator
+
+The actuarial validity of `credibility_reserve_estimate` is grounded in Thomas Mack's foundational paper (Mack, T., 2000, *Credibility Theory for Loss Reserving*, ASTIN Bulletin, 30(2), pp. 333–347):
+
+1. **Minimum Mean Squared Error (MSE) Optimality:**
+   Mack established that optimal loss reserving seeks a linear combination of the empirical development projection $\widehat{U}_{\text{CL}} = C \cdot f$ and the exogenous initial expected ultimate $M$:
+   $$\widehat{U}(Z) = Z \widehat{U}_{\text{CL}} + (1 - Z) M$$
+   Under the Gauss-Markov theorem, minimizing $\mathbb{E}[(\widehat{U} - U)^2]$ yields the optimal credibility factor:
+   $$Z^* = \frac{\text{Var}(M)}{\text{Var}(M) + \text{Var}(\widehat{U}_{\text{CL}} \mid U)}$$
+
+2. **The Bornhuetter-Ferguson Credibility Bridge ($Z = 1/f$):**
+   When historical development follows a standard Poisson or overdispersed Poisson incremental emergence process, the conditional variance of the link-ratio estimator satisfies $\text{Var}(\widehat{U}_{\text{CL}} \mid U) \propto (f - 1) U$. Under uniform prior variance across accident cohorts, $Z^*$ simplifies directly to the percentage of emerged losses $p = 1/f$.
+   - **Immature origin cohorts ($f \gg 1.0, p \ll 1.0 \implies Z \to 0$):** Reported claims $C$ are small and volatile. Full Chain-Ladder projections blow up random early fluctuations ($C \cdot f$). The credibility estimator stabilizes reserves by shrinking toward the prior expectation $M$.
+   - **Mature origin cohorts ($f \to 1.0, p \to 1.0 \implies Z \to 1.0$):** Link-ratio development is highly reliable and claims are almost fully settled. The credibility estimator places full confidence in empirical experience $C \cdot f$.
+
+---
+
+### 6. Statistical Model Diagnostics
 
 The `reserve_model_diagnostics` function computes:
 1. **Portfolio Balance / Imbalance:**
    $$\text{Imbalance} = \sum_{i=1}^I P_{i\bullet} (\widehat{P}_i - \bar{X}_i)$$
-   Under the credibility-weighted mean $\widehat{\mu}_Z$, the total predicted losses replicate total observed claims: $\text{Imbalance} = 0$.
+   Under the credibility-weighted mean $\widehat{\mu}_Z$, the total predicted losses replicate total observed claims: $\text{Imbalance} = 0$, both under equal and unequal exposure structures.
 2. **Theoretical Mean Squared Prediction Error:**
    In the Bühlmann model, the mean squared error of the linear predictor is:
    $$\text{MSE}(Z_i) = \mathbb{E}[(\widehat{P}_i - m(\Theta_i))^2] = (1 - Z_i) a$$
@@ -128,6 +168,7 @@ The `reserve_model_diagnostics` function computes:
 - Development factors: $f \ge 1.0$.
 - Credibility weights: $Z \in [0.0, 1.0]$.
 - Reported claims: $C \ge 0$, expected claims $M > 0$.
+- All numeric inputs must be strictly finite numbers (NaN, Inf, -Inf are rejected).
 
 ---
 

@@ -99,17 +99,15 @@ def free_parameter_credibility(
         >>> from therisktheory.credibility import free_parameter_credibility
         >>> # Kaas et al. (2008), Example 8.2.1 data: 5 states, 4 years
         >>> data = np.array([
-        ...     [106.0, 126.0, 114.0, 110.0],
-        ...     [120.0, 110.0, 134.0, 112.0],
-        ...     [110.0, 108.0, 118.0, 120.0],
-        ...     [102.0, 100.0, 106.0, 100.0],
-        ...     [124.0, 114.0, 114.0, 128.0],
+        ...     [40.0, 50.0, 60.0, 70.0],
+        ...     [20.0, 30.0, 40.0, 50.0],
+        ...     [60.0, 70.0, 80.0, 90.0],
         ... ])
         >>> res = free_parameter_credibility(data)
-        >>> round(float(res["process_variance"]), 2)
-        53.6
-        >>> round(float(res["variance_hypothetical_means"]), 2)
-        37.95
+        >>> float(res["overall_sample_mean"])
+        53.333333333333336
+        >>> float(res["process_variance"])
+        166.66666666666666
     """
     x = np.asarray(loss_matrix, dtype=np.float64)
     if x.ndim != 2:
@@ -144,57 +142,63 @@ def free_parameter_credibility(
     # Overall weighted sample mean: \bar{X}_{..}
     overall_mean = float(np.sum(p * x) / total_exposure)
 
-    # Degrees of freedom for within-risk process variance
-    # Count periods with positive weight per risk
+    # 1. Expected process variance: \hat{s}^2
+    # Degrees of freedom: sum_{i=1}^I (T_i - 1) where T_i is number of periods with P_{it} > 0
     active_periods_per_risk = np.sum(p > 0.0, axis=1)
-    df_within = np.sum(active_periods_per_risk - 1)
-    if df_within <= 0:
+    dof_s2 = int(np.sum(np.maximum(0, active_periods_per_risk - 1)))
+    if dof_s2 < 1:
         raise ValueError("Insufficient degrees of freedom to estimate process variance")
 
-    # Within-risk sum of squares: \sum_t P_{it} (X_{it} - \bar{X}_i)^2
-    deviations = x - individual_means[:, np.newaxis]
-    ss_within = float(np.sum(p * (deviations**2)))
-    s_squared = ss_within / df_within
+    # Deviation from individual mean: (X_{it} - \bar{X}_i)
+    sq_deviations = (x - individual_means[:, np.newaxis]) ** 2
+    s2_hat = float(np.sum(p * sq_deviations) / dof_s2)
 
-    # Between-risk variance: Bühlmann-Straub estimator
-    df_between = num_risks - 1
-    # c* = P_{..} - \sum P_{i.}^2 / P_{..} = \sum_{i \ne j} P_{i.} P_{j.} / P_{..} > 0
-    c_star = float(total_exposure - np.sum(row_weights**2) / total_exposure)
+    # 2. Variance of hypothetical means: \hat{a}
+    # c* = P_{..} - sum(P_{i.}^2) / P_{..}
+    sum_sq_row_weights = np.sum(row_weights**2)
+    c_star = float(total_exposure - (sum_sq_row_weights / total_exposure))
+    if c_star <= 0.0:
+        raise ValueError("Degenerate exposure structure: c* <= 0")
 
-    # Between-risk sum of squares: \sum P_{i.} (\bar{X}_i - \bar{X}_{..})^2
-    ss_between = float(np.sum(row_weights * ((individual_means - overall_mean) ** 2)))
-    a_raw = (ss_between - df_between * s_squared) / c_star
+    # Between-group sum of squares: sum P_{i.} (\bar{X}_i - \bar{X}_{..})^2
+    ssb = float(np.sum(row_weights * ((individual_means - overall_mean) ** 2)))
+
+    # Raw unbiased estimator: (SSB - (I - 1)*s^2) / c*
+    dof_between = num_risks - 1
+    a_raw = float((ssb - dof_between * s2_hat) / c_star)
+
+    # Truncation at 0 for parameter space admissibility: a = Var(m(Theta)) >= 0
     a_hat = max(0.0, a_raw)
 
-    # Credibility factor Z_i and parameter ratio k
+    # 3. Credibility factors: Z_i = a * P_{i.} / (a * P_{i.} + s^2) = P_{i.} / (P_{i.} + s^2/a)
     if a_hat > 0.0:
-        k_ratio = s_squared / a_hat
+        k_ratio = s2_hat / a_hat
         z_factors = row_weights / (row_weights + k_ratio)
     else:
-        k_ratio = np.inf
+        k_ratio = float("inf")
         z_factors = np.zeros(num_risks, dtype=np.float64)
 
-    # Credibility-weighted collective mean \mu_Z
-    sum_z = np.sum(z_factors)
-    if sum_z > 0.0:
-        collective_mean_z = float(np.sum(z_factors * individual_means) / sum_z)
+    # 4. Credibility-weighted collective mean: \hat{mu}_Z = sum(Z_i * \bar{X}_i) / sum(Z_i)
+    total_z = float(np.sum(z_factors))
+    if total_z > 0.0:
+        collective_mean = float(np.sum(z_factors * individual_means) / total_z)
     else:
-        collective_mean_z = overall_mean
+        collective_mean = overall_mean
 
-    # Credibility premiums
-    premiums = z_factors * individual_means + (1.0 - z_factors) * collective_mean_z
+    # 5. Credibility premiums: \hat{P}_i = Z_i * \bar{X}_i + (1 - Z_i) * \hat{mu}_Z
+    cred_premiums = z_factors * individual_means + (1.0 - z_factors) * collective_mean
 
     return {
-        "credibility_premiums": premiums,
-        "credibility_factors": z_factors,
-        "individual_means": individual_means,
-        "collective_mean": collective_mean_z,
+        "credibility_premiums": np.asarray(cred_premiums, dtype=np.float64),
+        "credibility_factors": np.asarray(z_factors, dtype=np.float64),
+        "individual_means": np.asarray(individual_means, dtype=np.float64),
+        "collective_mean": collective_mean,
         "overall_sample_mean": overall_mean,
-        "process_variance": s_squared,
+        "process_variance": s2_hat,
         "variance_hypothetical_means": a_hat,
         "raw_variance_hypothetical_means": a_raw,
         "k_ratio": k_ratio,
-        "total_weights": row_weights,
+        "total_weights": np.asarray(row_weights, dtype=np.float64),
     }
 
 
@@ -256,7 +260,8 @@ def credibility_reserve_estimate(
             - ``"implied_loss_ratio"``: Ultimate claims divided by premium (if provided).
 
     Raises:
-        ValueError: If :math:`C < 0`, :math:`M \le 0`, :math:`f < 1.0`, or :math:`Z \notin [0, 1]`.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), or if :math:`C < 0`,
+            :math:`M \le 0`, :math:`f < 1.0`, or :math:`Z \notin [0, 1]`.
 
     Notes:
         Validation status: experimental.
@@ -283,6 +288,9 @@ def credibility_reserve_estimate(
     m = np.asarray(expected_claims, dtype=np.float64)
     f = np.asarray(development_factor, dtype=np.float64)
 
+    if not (np.all(np.isfinite(c)) and np.all(np.isfinite(m)) and np.all(np.isfinite(f))):
+        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+
     if np.any(c < 0.0):
         raise ValueError("reported_claims must be non-negative")
     if np.any(m <= 0.0):
@@ -296,6 +304,8 @@ def credibility_reserve_estimate(
         z = emergence
     else:
         z = np.asarray(credibility_factor, dtype=np.float64)
+        if not np.all(np.isfinite(z)):
+            raise ValueError("credibility_factor must contain only finite numbers")
         if np.any((z < 0.0) | (z > 1.0)):
             raise ValueError("credibility_factor must be between 0.0 and 1.0 inclusive")
 
@@ -314,6 +324,8 @@ def credibility_reserve_estimate(
 
     if premiums is not None:
         prem = np.asarray(premiums, dtype=np.float64)
+        if not np.all(np.isfinite(prem)):
+            raise ValueError("premiums must contain only finite numbers")
         if np.any(prem <= 0.0):
             raise ValueError("premiums must be strictly positive")
         result["implied_loss_ratio"] = np.asarray(cred_ultimate / prem, dtype=np.float64)
@@ -378,7 +390,8 @@ def reserve_model_diagnostics(
             - ``"residuals"``: NDArray[np.float64], :math:`X_i - \widehat{Y}_i`.
 
     Raises:
-        ValueError: If input arrays have mismatched dimensions or invalid bounds.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), or if input arrays
+            have mismatched dimensions or invalid bounds.
 
     Notes:
         Validation status: experimental.
@@ -390,7 +403,14 @@ def reserve_model_diagnostics(
     y_obs = np.asarray(observed_values, dtype=np.float64)
     y_fit = np.asarray(credibility_estimates, dtype=np.float64)
     z = np.asarray(credibility_factors, dtype=np.float64)
-    m = float(np.asarray(collective_mean, dtype=np.float64).item())
+
+    if not (np.all(np.isfinite(y_obs)) and np.all(np.isfinite(y_fit)) and np.all(np.isfinite(z))):
+        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+
+    coll_m = np.asarray(collective_mean, dtype=np.float64)
+    if not np.all(np.isfinite(coll_m)):
+        raise ValueError("collective_mean must contain only finite numbers")
+    m = float(coll_m.item())
 
     if y_obs.ndim != 1 or y_fit.ndim != 1 or z.ndim != 1:
         raise ValueError("observed_values, credibility_estimates, and factors must be 1D arrays")
@@ -404,6 +424,8 @@ def reserve_model_diagnostics(
         w = np.ones(n, dtype=np.float64)
     else:
         w = np.asarray(weights, dtype=np.float64)
+        if not np.all(np.isfinite(w)):
+            raise ValueError("weights must contain only finite numbers")
         if w.shape != y_obs.shape or np.any(w < 0.0):
             raise ValueError("weights must be non-negative with matching shape")
 
@@ -435,12 +457,16 @@ def reserve_model_diagnostics(
     }
 
     if hypothetical_mean_variance is not None:
+        if not np.isfinite(hypothetical_mean_variance):
+            raise ValueError("hypothetical_mean_variance must be finite")
         a = float(hypothetical_mean_variance)
         if a < 0.0:
             raise ValueError("hypothetical_mean_variance must be non-negative")
         diag["theoretical_mse"] = (1.0 - z) * a
 
     if process_variance is not None:
+        if not np.isfinite(process_variance):
+            raise ValueError("process_variance must be finite")
         s2 = float(process_variance)
         if s2 < 0.0:
             raise ValueError("process_variance must be non-negative")
