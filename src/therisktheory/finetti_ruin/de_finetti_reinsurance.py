@@ -50,15 +50,15 @@ def proportional_reinsurance_objective(
           = \frac{\mu}{\sigma^2} \left[ \frac{\eta - \xi}{\alpha^2} + \frac{\xi}{\alpha} \right]
 
       At zero retention (:math:`\alpha = 0`), retained variance is zero. The function evaluates
-      the limiting behavior :math:`\lim_{\alpha \to 0^+} \theta(\alpha)`:
+      the continuous limiting behavior :math:`\lim_{\alpha \to 0^+} \theta(\alpha)`:
       - If :math:`\eta > \xi`: The insurer eliminates all underwriting risk while locking in a
         strictly positive net premium margin :math:`(\eta - \xi)\mu > 0` (arbitrage/fronting
         margin), so :math:`\theta(0) = +\infty` (represented as ``np.inf``).
       - If :math:`\eta = \xi > 0`: Expected profit is :math:`\alpha \eta \mu` and variance is
         :math:`\alpha^2 \sigma^2`, so :math:`\theta(\alpha) = \frac{\eta \mu}{\alpha \sigma^2}
         \to +\infty` (represented as ``np.inf``).
-      - If :math:`\eta = \xi = 0`: Both profit and variance are identically zero for all
-        :math:`\alpha`, so :math:`\theta(0) = 0.0`.
+      - If :math:`\eta = \xi = 0` (degenerate zero drift and zero loading): Both profit and
+        variance are identically zero for all :math:`\alpha`, so :math:`\theta(0) = 0.0`.
       - If :math:`\xi > \eta`: The insurer pays more for reinsurance than it collects, incurring
         a guaranteed loss :math:`(\eta - \xi)\mu < 0` with zero variance, so
         :math:`\lim_{\alpha \to 0^+} \theta(\alpha) = -\infty` (represented as ``-np.inf``).
@@ -92,9 +92,10 @@ def proportional_reinsurance_objective(
         NDArray[np.float64]: Computed objective value. NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If inputs violate domain bounds (:math:`\alpha \notin [0, 1]`,
-            :math:`\mu \le 0`, :math:`\sigma^2 \le 0`, :math:`\eta < 0`, :math:`\xi < 0`,
-            :math:`k \le 0`), or if ``criterion`` is unrecognized.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf), or violate domain bounds
+            (:math:`\alpha \notin [0, 1]`, :math:`\mu \le 0`, :math:`\sigma^2 \le 0`,
+            :math:`\eta < 0`, :math:`\xi < 0`, :math:`k \le 0`), or if ``criterion`` is
+            unrecognized.
 
     Notes:
         Validation status: experimental.
@@ -128,6 +129,15 @@ def proportional_reinsurance_objective(
     var = np.asarray(variance_loss, dtype=np.float64)
     eta = np.asarray(insurer_loading, dtype=np.float64)
     xi = np.asarray(reinsurer_loading, dtype=np.float64)
+
+    if not (
+        np.all(np.isfinite(alpha))
+        and np.all(np.isfinite(mu))
+        and np.all(np.isfinite(var))
+        and np.all(np.isfinite(eta))
+        and np.all(np.isfinite(xi))
+    ):
+        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
 
     if np.any((alpha < 0.0) | (alpha > 1.0)):
         raise ValueError("retention_rate must be between 0.0 and 1.0 inclusive")
@@ -164,6 +174,8 @@ def proportional_reinsurance_objective(
                 "risk_aversion parameter must be provided when criterion='mean_variance'"
             )
         k = np.asarray(risk_aversion, dtype=np.float64)
+        if not np.all(np.isfinite(k)):
+            raise ValueError("risk_aversion must contain only finite numbers")
         if np.any(k <= 0.0):
             raise ValueError("risk_aversion must be strictly positive")
         res = expected_profit - 0.5 * k * retained_var
@@ -174,7 +186,7 @@ def proportional_reinsurance_objective(
     # lim_{alpha -> 0+} theta(alpha):
     # - If eta > xi: positive arbitrage drift / 0^+ -> +inf
     # - If eta == xi and eta > 0: eta*mu / (alpha*var) -> +inf
-    # - If eta == xi == 0: zero drift / zero var -> 0.0
+    # - If eta == xi == 0: zero drift / zero var -> 0.0 (degenerate null drift)
     # - If xi > eta: negative drift / 0^+ -> -inf
     with np.errstate(divide="ignore", invalid="ignore"):
         raw_ratio = expected_profit / retained_var
@@ -271,7 +283,8 @@ def de_finetti_optimal_retention(
         NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If inputs violate domain bounds or if ``criterion`` is invalid.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf) or violate domain bounds
+            or if ``criterion`` is invalid.
 
     Notes:
         Validation status: experimental.
@@ -302,6 +315,14 @@ def de_finetti_optimal_retention(
     eta = np.asarray(insurer_loading, dtype=np.float64)
     xi = np.asarray(reinsurer_loading, dtype=np.float64)
 
+    if not (
+        np.all(np.isfinite(mu))
+        and np.all(np.isfinite(var))
+        and np.all(np.isfinite(eta))
+        and np.all(np.isfinite(xi))
+    ):
+        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+
     if np.any(mu <= 0.0):
         raise ValueError("expected_loss must be strictly positive")
     if np.any(var <= 0.0):
@@ -331,6 +352,8 @@ def de_finetti_optimal_retention(
                 "risk_aversion parameter must be provided when criterion='mean_variance'"
             )
         k = np.asarray(risk_aversion, dtype=np.float64)
+        if not np.all(np.isfinite(k)):
+            raise ValueError("risk_aversion must contain only finite numbers")
         if np.any(k <= 0.0):
             raise ValueError("risk_aversion must be strictly positive")
         alpha_star = (xi * mu) / (k * var)
@@ -369,17 +392,25 @@ def de_finetti_retention_ruin_approximation(
     (where :math:`R > 0` is the Cramér-Lundberg adjustment coefficient satisfying
     :math:`\mathbb{E}[e^{R(X - c)}] = 1`). For general compound Poisson processes with
     non-exponential claims, :math:`\psi_{\text{diff}}(u; \alpha)` can either underestimate or
-    overestimate the exact ruin probability :math:`\psi(u)`. It matches the exact asymptotic
-    exponent only in the Brownian diffusion limit.
+    overestimate the exact ruin probability :math:`\psi(u)`.
 
-    Boundary and limiting cases:
-    - If :math:`\theta(\alpha) \le 0`: Expected drift is non-positive; ruin is almost surely
-      certain, so :math:`\psi_{\text{diff}} = 1.0`.
-    - If :math:`\theta(\alpha) = +\infty` (e.g. :math:`\alpha = 0` with :math:`\eta \ge \xi > 0`):
+    **Degenerate Boundary Cases (Zero Reserve and Zero Drift)**:
+    - **Zero Initial Reserve (:math:`u = 0`)**: The initial surplus begins exactly on the ruin
+      barrier :math:`U(0) = 0`. Under both discrete and continuous ruin formulations, ruin occurs
+      instantaneously with certainty: :math:`\psi_{\text{diff}}(0) = 1.0`, regardless of drift
+      rate :math:`\theta`.
+    - **Zero Drift (:math:`\theta = 0.0`)**: When expected net premium equals expected retained
+      claims (:math:`\mathbb{E}[\Delta U] = 0`), the surplus is a pure martingale. An unbiased
+      Brownian motion on :math:`[0, \infty)` is recurrent and hits zero with probability 1.0
+      almost surely, yielding :math:`\psi_{\text{diff}}(u) = 1.0` for all :math:`u \ge 0`.
+    - **Zero Reserve and Zero Drift (:math:`u = 0, \theta = 0`)**: Both degenerate conditions
+      coincide, giving :math:`\psi_{\text{diff}}(0; 0) = 1.0`.
+    - **Negative Drift (:math:`\theta < 0.0`)**: Expected drift is negative; ruin is almost
+      surely certain: :math:`\psi_{\text{diff}} = 1.0`.
+    - **Infinite Safety Index (:math:`\theta = +\infty`)**: When :math:`\alpha = 0` with
+      :math:`\eta \ge \xi > 0` (arbitrage fronting with zero variance):
       For :math:`u > 0`, :math:`\psi_{\text{diff}} = \exp(-\infty) = 0.0`.
-      For :math:`u = 0`, :math:`\psi_{\text{diff}} = 1.0`.
-    - If :math:`u = 0` with :math:`0 < \theta(\alpha) < +\infty`:
-      :math:`\psi_{\text{diff}}(0) = 1.0`.
+      For :math:`u = 0`, the barrier boundary applies: :math:`\psi_{\text{diff}}(0) = 1.0`.
 
     Args:
         initial_capital: Initial reserve capital :math:`u \ge 0`.
@@ -400,7 +431,7 @@ def de_finetti_retention_ruin_approximation(
         NumPy broadcasting rules apply.
 
     Raises:
-        ValueError: If ``initial_capital < 0`` or other domain restrictions are violated.
+        ValueError: If inputs contain non-finite numbers (NaN/Inf) or if ``initial_capital < 0``.
 
     Notes:
         Validation status: experimental.
@@ -424,8 +455,13 @@ def de_finetti_retention_ruin_approximation(
         ... )
         >>> float(prob) < 1.0
         True
+        >>> # Degenerate zero reserve yields ruin certainty
+        >>> float(de_finetti_retention_ruin_approximation(0.0, 0.5, 100.0, 400.0, 0.15, 0.20))
+        1.0
     """
     u = np.asarray(initial_capital, dtype=np.float64)
+    if not np.all(np.isfinite(u)):
+        raise ValueError("initial_capital must contain only finite numbers")
     if np.any(u < 0.0):
         raise ValueError("initial_capital must be non-negative")
 
@@ -439,19 +475,16 @@ def de_finetti_retention_ruin_approximation(
     )
 
     # Evaluate diffusion approximation:
-    # 1. theta <= 0 -> ruin is certain: psi = 1.0
-    # 2. theta == +inf:
-    #      if u == 0 -> 1.0 (boundary initial reserve)
-    #      if u > 0  -> exp(-inf) = 0.0
-    # 3. 0 < theta < +inf: exp(-2.0 * theta * u)
+    # 1. theta <= 0.0 or u == 0.0 -> ruin is certain: psi = 1.0
+    # 2. theta == +inf and u > 0 -> exp(-inf) = 0.0
+    # 3. 0 < theta < +inf and u > 0 -> exp(-2.0 * theta * u)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         safe_exponent = np.where((theta <= 0.0) | np.isposinf(theta), 0.0, -2.0 * theta * u)
         normal_approx = np.exp(safe_exponent)
-        inf_theta_val = np.where(u == 0.0, 1.0, 0.0)
         approx = np.where(
-            theta <= 0.0,
+            (theta <= 0.0) | (u == 0.0),
             1.0,
-            np.where(np.isposinf(theta), inf_theta_val, normal_approx),
+            np.where(np.isposinf(theta), 0.0, normal_approx),
         )
 
     return np.asarray(np.clip(approx, 0.0, 1.0), dtype=np.float64)

@@ -411,6 +411,99 @@ def test_de_finetti_retention_ruin_infinite_theta() -> None:
     assert np.asarray(res_zero_u).item() == 1.0
 
 
+def test_degenerate_zero_reserve_and_zero_drift() -> None:
+    """Verify degenerate boundary conditions: zero initial reserve and zero drift."""
+    # 1. Zero initial reserve u = 0 with positive drift -> ruin is certain (psi = 1.0)
+    ruin_u0 = de_finetti_retention_ruin_approximation(
+        initial_capital=0.0,
+        retention_rate=0.5,
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.20,
+        reinsurer_loading=0.20,
+    )
+    assert np.asarray(ruin_u0).item() == 1.0
+
+    # 2. Zero drift theta = 0 with positive initial reserve u > 0 -> psi = 1.0
+    # Expected profit = (eta - (1 - alpha) * xi) * mu
+    # For alpha = 0.5, eta = 0.10, xi = 0.20: (0.10 - 0.5 * 0.20) * mu = 0.0 -> theta = 0.0
+    ruin_drift0 = de_finetti_retention_ruin_approximation(
+        initial_capital=100.0,
+        retention_rate=0.5,
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.10,
+        reinsurer_loading=0.20,
+    )
+    assert np.asarray(ruin_drift0).item() == 1.0
+
+    # 3. Degenerate null reserve AND null drift (u = 0, theta = 0) -> psi = 1.0
+    ruin_both0 = de_finetti_retention_ruin_approximation(
+        initial_capital=0.0,
+        retention_rate=0.5,
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.10,
+        reinsurer_loading=0.20,
+    )
+    assert np.asarray(ruin_both0).item() == 1.0
+
+    # 4. Vectorized degenerate boundary cases
+    u_vec = np.array([0.0, 50.0, 0.0, 100.0])
+    alpha_vec = np.array([0.5, 0.5, 0.5, 0.5])
+    eta_vec = np.array([0.20, 0.10, 0.10, 0.30])
+    res_vec = de_finetti_retention_ruin_approximation(
+        initial_capital=u_vec,
+        retention_rate=alpha_vec,
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=eta_vec,
+        reinsurer_loading=0.20,
+    )
+    assert res_vec[0] == 1.0  # u = 0
+    assert res_vec[1] == 1.0  # theta = 0
+    assert res_vec[2] == 1.0  # u = 0 and theta = 0
+    assert 0.0 < res_vec[3] < 1.0  # u > 0, theta > 0
+
+
+@pytest.mark.parametrize("bad_val", [np.nan, np.inf, -np.inf])
+def test_rejection_of_non_finite_inputs(bad_val: float) -> None:
+    """Verify that all public functions reject non-finite inputs (NaN and Inf)."""
+    # 1. proportional_reinsurance_objective
+    with pytest.raises(ValueError, match="finite"):
+        proportional_reinsurance_objective(bad_val, 100.0, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="finite"):
+        proportional_reinsurance_objective(0.5, bad_val, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="finite"):
+        proportional_reinsurance_objective(0.5, 100.0, bad_val, 0.15, 0.20)
+    with pytest.raises(ValueError, match="finite"):
+        proportional_reinsurance_objective(0.5, 100.0, 400.0, bad_val, 0.20)
+    with pytest.raises(ValueError, match="finite"):
+        proportional_reinsurance_objective(0.5, 100.0, 400.0, 0.15, bad_val)
+    with pytest.raises(ValueError, match="finite"):
+        proportional_reinsurance_objective(
+            0.5, 100.0, 400.0, 0.15, 0.20, criterion="mean_variance", risk_aversion=bad_val
+        )
+
+    # 2. de_finetti_optimal_retention
+    with pytest.raises(ValueError, match="finite"):
+        de_finetti_optimal_retention(bad_val, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="finite"):
+        de_finetti_optimal_retention(100.0, bad_val, 0.15, 0.20)
+    with pytest.raises(ValueError, match="finite"):
+        de_finetti_optimal_retention(100.0, 400.0, bad_val, 0.20)
+    with pytest.raises(ValueError, match="finite"):
+        de_finetti_optimal_retention(100.0, 400.0, 0.15, bad_val)
+    with pytest.raises(ValueError, match="finite"):
+        de_finetti_optimal_retention(
+            100.0, 400.0, 0.15, 0.20, criterion="mean_variance", risk_aversion=bad_val
+        )
+
+    # 3. de_finetti_retention_ruin_approximation
+    with pytest.raises(ValueError, match="finite"):
+        de_finetti_retention_ruin_approximation(bad_val, 0.5, 100.0, 400.0, 0.15, 0.20)
+
+
 def test_alias_backward_compatibility() -> None:
     """Verify de_finetti_retention_ruin_bound is identical to approximation."""
     assert de_finetti_retention_ruin_bound is de_finetti_retention_ruin_approximation
