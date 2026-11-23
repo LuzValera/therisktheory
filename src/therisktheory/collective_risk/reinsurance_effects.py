@@ -123,7 +123,9 @@ def proportional_reinsurance_process(
         and np.all(np.isfinite(xi))
         and np.all(np.isfinite(alpha))
     ):
-        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+        raise ValueError(
+            "inputs must contain only finite numbers (NaN and Inf not permitted)"
+        )
 
     if np.any(lam <= 0.0):
         raise ValueError("claim_rate must be strictly positive")
@@ -264,7 +266,9 @@ def excess_of_loss_reinsurance_process(
         and np.all(np.isfinite(theta))
         and np.all(np.isfinite(xi))
     ):
-        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+        raise ValueError(
+            "inputs must contain only finite numbers (NaN and Inf not permitted)"
+        )
 
     if np.any(lam <= 0.0):
         raise ValueError("claim_rate must be strictly positive")
@@ -418,7 +422,9 @@ def reinsurance_adjustment_coefficient(
         and np.all(np.isfinite(xi))
         and np.all(np.isfinite(param))
     ):
-        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+        raise ValueError(
+            "inputs must contain only finite numbers (NaN and Inf not permitted)"
+        )
 
     if np.any(lam <= 0.0):
         raise ValueError("claim_rate must be strictly positive")
@@ -436,7 +442,9 @@ def reinsurance_adjustment_coefficient(
 
     if treaty_type == "proportional":
         if np.any((param < 0.0) | (param > 1.0)):
-            raise ValueError("retention_param (alpha) must be between 0.0 and 1.0 inclusive")
+            raise ValueError(
+                "retention_param (alpha) must be between 0.0 and 1.0 inclusive"
+            )
 
         # Closed form: R(a) = beta * [theta - xi*(1 - a)] / (a * [a + theta - xi*(1 - a)])
         num = beta * (theta - xi * (1.0 - param))
@@ -453,7 +461,9 @@ def reinsurance_adjustment_coefficient(
 
     if treaty_type == "excess_of_loss":
         if np.any(param <= 0.0):
-            raise ValueError("retention_param (priority d) must be strictly positive")
+            raise ValueError(
+                "retention_param (priority d) must be strictly positive"
+            )
 
         # Solve root numerically for scalar / broadcasted inputs
         broadcasted = np.broadcast_arrays(lam, mu1, theta, xi, param)
@@ -473,7 +483,9 @@ def reinsurance_adjustment_coefficient(
             mu1_ret = m_val * (1.0 - exp_term)
             mu1_ced = m_val * exp_term
 
-            c_ret = (1.0 + th_val) * l_val * m_val - (1.0 + xi_val) * l_val * mu1_ced
+            c_ret = (1.0 + th_val) * l_val * m_val - (
+                1.0 + xi_val
+            ) * l_val * mu1_ced
             net_drift = c_ret - l_val * mu1_ret
 
             if net_drift <= 0.0:
@@ -482,7 +494,12 @@ def reinsurance_adjustment_coefficient(
 
             # Find upper bracket where lundberg equation is strictly positive
             r_upper = 0.1 * b_val
-            while _excess_of_loss_lundberg_equation(r_upper, b_val, d_val, l_val, c_ret) <= 0.0:
+            while (
+                _excess_of_loss_lundberg_equation(
+                    r_upper, b_val, d_val, l_val, c_ret
+                )
+                <= 0.0
+            ):
                 r_upper *= 2.0
 
             root = brentq(
@@ -495,7 +512,9 @@ def reinsurance_adjustment_coefficient(
 
         return np.asarray(out, dtype=np.float64)
 
-    raise ValueError(f"treaty_type must be 'proportional' or 'excess_of_loss', got {treaty_type!r}")
+    raise ValueError(
+        f"treaty_type must be 'proportional' or 'excess_of_loss', got {treaty_type!r}"
+    )
 
 
 def optimal_reinsurance_retention(
@@ -570,7 +589,9 @@ def optimal_reinsurance_retention(
             raise ValueError(f"{name} must be a finite number")
 
     if claim_rate <= 0.0 or claim_mean <= 0.0 or safety_loading <= 0.0:
-        raise ValueError("claim_rate, claim_mean, and safety_loading must be strictly positive")
+        raise ValueError(
+            "claim_rate, claim_mean, and safety_loading must be strictly positive"
+        )
     if reinsurer_loading <= 0.0:
         raise ValueError("reinsurer_loading must be strictly positive")
 
@@ -578,7 +599,9 @@ def optimal_reinsurance_retention(
     r_gross = float((beta * safety_loading) / (1.0 + safety_loading))
 
     if treaty_type == "proportional":
-        alpha_min = max(0.0, min(1.0 - 1e-12, 1.0 - (safety_loading / reinsurer_loading)))
+        alpha_min = max(
+            0.0, min(1.0 - 1e-12, 1.0 - (safety_loading / reinsurer_loading))
+        )
         width = 1.0 - alpha_min
         lower_bound = alpha_min + 1e-4 * width
 
@@ -594,11 +617,15 @@ def optimal_reinsurance_retention(
             )
             return -float(np.asarray(r).item())
 
-        opt_res = minimize_scalar(neg_r, bounds=(lower_bound, 1.0), method="bounded")
+        opt_res = minimize_scalar(
+            neg_r, bounds=(lower_bound, 1.0), method="bounded"
+        )
         alpha_opt = float(opt_res.x)
         r_opt = -float(opt_res.fun)
 
-        th_ret = float((safety_loading - reinsurer_loading * (1.0 - alpha_opt)) / alpha_opt)
+        th_ret = float(
+            (safety_loading - reinsurer_loading * (1.0 - alpha_opt)) / alpha_opt
+        )
         gain = (r_opt - r_gross) / r_gross if r_gross > 0.0 else 0.0
 
         return {
@@ -613,7 +640,9 @@ def optimal_reinsurance_retention(
     if treaty_type == "excess_of_loss":
         # Minimum viable priority: net drift > 0 <=> theta - xi * exp(-d / mu1) > 0
         if reinsurer_loading > safety_loading:
-            d_min = float(claim_mean * np.log(reinsurer_loading / safety_loading))
+            d_min = float(
+                claim_mean * np.log(reinsurer_loading / safety_loading)
+            )
         else:
             d_min = 0.0
 
@@ -660,7 +689,9 @@ def optimal_reinsurance_retention(
             "minimum_viable_retention": d_min,
         }
 
-    raise ValueError(f"treaty_type must be 'proportional' or 'excess_of_loss', got {treaty_type!r}")
+    raise ValueError(
+        f"treaty_type must be 'proportional' or 'excess_of_loss', got {treaty_type!r}"
+    )
 
 
 def reinsurance_ruin_bound(
@@ -671,7 +702,9 @@ def reinsurance_ruin_bound(
     reinsurer_loading: float | ArrayLike,
     retention_rate: float | ArrayLike = 1.0,
     treaty_type: Literal["proportional"] = "proportional",
-    method: Literal["cramer_lundberg_exact", "lundberg_upper_bound"] = "cramer_lundberg_exact",
+    method: Literal[
+        "cramer_lundberg_exact", "lundberg_upper_bound"
+    ] = "cramer_lundberg_exact",
 ) -> dict[str, NDArray[np.float64]]:
     r"""Evaluate ruin probabilities and Lundberg upper bounds under reinsurance.
 
@@ -748,7 +781,9 @@ def reinsurance_ruin_bound(
         and np.all(np.isfinite(xi))
         and np.all(np.isfinite(alpha))
     ):
-        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+        raise ValueError(
+            "inputs must contain only finite numbers (NaN and Inf not permitted)"
+        )
 
     if np.any(u < 0.0):
         raise ValueError("initial_capital must be non-negative")
@@ -769,7 +804,9 @@ def reinsurance_ruin_bound(
     r_gross = (beta * theta) / (1.0 + theta)
     with np.errstate(divide="ignore", invalid="ignore"):
         if method == "cramer_lundberg_exact":
-            psi_gross = np.where(u == 0.0, 1.0, (1.0 / (1.0 + theta)) * np.exp(-r_gross * u))
+            psi_gross = np.where(
+                u == 0.0, 1.0, (1.0 / (1.0 + theta)) * np.exp(-r_gross * u)
+            )
         else:
             psi_gross = np.where(u == 0.0, 1.0, np.exp(-r_gross * u))
 
@@ -783,10 +820,18 @@ def reinsurance_ruin_bound(
     with np.errstate(divide="ignore", invalid="ignore"):
         if method == "cramer_lundberg_exact":
             normal_psi_ret = (1.0 / (1.0 + th_ret)) * np.exp(-r_ret * u)
-            psi_ret = np.where((u == 0.0) | (th_ret <= 0.0) | (r_ret <= 0.0), 1.0, normal_psi_ret)
+            psi_ret = np.where(
+                (u == 0.0) | (th_ret <= 0.0) | (r_ret <= 0.0),
+                1.0,
+                normal_psi_ret,
+            )
         else:
             normal_psi_ret = np.exp(-r_ret * u)
-            psi_ret = np.where((u == 0.0) | (th_ret <= 0.0) | (r_ret <= 0.0), 1.0, normal_psi_ret)
+            psi_ret = np.where(
+                (u == 0.0) | (th_ret <= 0.0) | (r_ret <= 0.0),
+                1.0,
+                normal_psi_ret,
+            )
 
     psi_gross_clipped = np.clip(psi_gross, 0.0, 1.0)
     psi_ret_clipped = np.clip(psi_ret, 0.0, 1.0)
@@ -799,8 +844,12 @@ def reinsurance_ruin_bound(
         )
 
     return {
-        "reinsured_ruin_probability": np.asarray(psi_ret_clipped, dtype=np.float64),
-        "gross_ruin_probability": np.asarray(psi_gross_clipped, dtype=np.float64),
+        "reinsured_ruin_probability": np.asarray(
+            psi_ret_clipped, dtype=np.float64
+        ),
+        "gross_ruin_probability": np.asarray(
+            psi_gross_clipped, dtype=np.float64
+        ),
         "ruin_reduction_ratio": np.asarray(reduction, dtype=np.float64),
         "reinsured_adjustment_coefficient": np.asarray(r_ret, dtype=np.float64),
         "gross_adjustment_coefficient": np.asarray(r_gross, dtype=np.float64),
@@ -894,12 +943,16 @@ def reinsurance_capital_relief(
         and np.all(np.isfinite(xi))
         and np.all(np.isfinite(alpha))
     ):
-        raise ValueError("inputs must contain only finite numbers (NaN and Inf not permitted)")
+        raise ValueError(
+            "inputs must contain only finite numbers (NaN and Inf not permitted)"
+        )
 
     if np.any((eps <= 0.0) | (eps >= 1.0)):
         raise ValueError("ruin_tolerance must be strictly between 0.0 and 1.0")
     if np.any(lam <= 0.0) or np.any(mu1 <= 0.0) or np.any(theta <= 0.0):
-        raise ValueError("claim_rate, claim_mean, and safety_loading must be strictly positive")
+        raise ValueError(
+            "claim_rate, claim_mean, and safety_loading must be strictly positive"
+        )
     if np.any(xi < 0.0):
         raise ValueError("reinsurer_loading must be non-negative")
     if np.any((alpha <= 0.0) | (alpha > 1.0)):
@@ -908,7 +961,9 @@ def reinsurance_capital_relief(
     proc = proportional_reinsurance_process(lam, mu1, mu1**2, theta, xi, alpha)
     th_ret = proc["retained_safety_loading"]
     if np.any(th_ret <= 0.0):
-        raise ValueError("retention_rate violates net profit condition (theta_ret <= 0)")
+        raise ValueError(
+            "retention_rate violates net profit condition (theta_ret <= 0)"
+        )
 
     r_ret = reinsurance_adjustment_coefficient(
         lam, mu1, theta, xi, alpha, treaty_type="proportional"
@@ -917,8 +972,12 @@ def reinsurance_capital_relief(
         lam, mu1, theta, xi, np.ones_like(alpha), treaty_type="proportional"
     )
 
-    u_gross = np.maximum(0.0, (1.0 / r_gross) * np.log(1.0 / ((1.0 + theta) * eps)))
-    u_ret = np.maximum(0.0, (1.0 / r_ret) * np.log(1.0 / ((1.0 + th_ret) * eps)))
+    u_gross = np.maximum(
+        0.0, (1.0 / r_gross) * np.log(1.0 / ((1.0 + theta) * eps))
+    )
+    u_ret = np.maximum(
+        0.0, (1.0 / r_ret) * np.log(1.0 / ((1.0 + th_ret) * eps))
+    )
 
     diff = u_gross - u_ret
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -1007,7 +1066,9 @@ def compare_de_finetti_lundberg_retention(
     ):
         raise ValueError("All parameters must be strictly positive")
 
-    alpha_min = max(0.0, min(1.0 - 1e-12, 1.0 - (safety_loading / reinsurer_loading)))
+    alpha_min = max(
+        0.0, min(1.0 - 1e-12, 1.0 - (safety_loading / reinsurer_loading))
+    )
     width = 1.0 - alpha_min
     low_bound = alpha_min + 1e-4 * width
 
@@ -1019,7 +1080,9 @@ def compare_de_finetti_lundberg_retention(
         var_term = (a**2) * mu2
         return -float(drift / var_term)
 
-    opt_df = minimize_scalar(neg_de_finetti_index, bounds=(low_bound, 1.0), method="bounded")
+    opt_df = minimize_scalar(
+        neg_de_finetti_index, bounds=(low_bound, 1.0), method="bounded"
+    )
     alpha_df = float(opt_df.x)
     idx_df = -float(opt_df.fun)
 

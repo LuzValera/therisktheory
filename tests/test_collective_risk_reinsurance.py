@@ -14,7 +14,9 @@ from therisktheory.collective_risk import (
     reinsurance_capital_relief,
     reinsurance_ruin_bound,
 )
-from therisktheory.collective_risk.reinsurance_effects import _excess_of_loss_lundberg_equation
+from therisktheory.collective_risk.reinsurance_effects import (
+    _excess_of_loss_lundberg_equation,
+)
 
 # ============================================================================
 # Tests for proportional_reinsurance_process
@@ -41,12 +43,24 @@ def test_proportional_reinsurance_process_scalar() -> None:
         retention_rate=0.80,
     )
     assert np.asarray(res["retained_claim_mean"]).item() == pytest.approx(1.6)
-    assert np.asarray(res["retained_claim_variance"]).item() == pytest.approx(2.56)
-    assert np.asarray(res["retained_claim_second_moment"]).item() == pytest.approx(5.12)
-    assert np.asarray(res["retained_premium_rate"]).item() == pytest.approx(188.0)
-    assert np.asarray(res["retained_safety_loading"]).item() == pytest.approx(0.175)
-    assert np.asarray(res["expected_annual_drift"]).item() == pytest.approx(28.0)
-    assert np.asarray(res["minimum_viable_retention"]).item() == pytest.approx(1.0 / 3.0)
+    assert np.asarray(res["retained_claim_variance"]).item() == pytest.approx(
+        2.56
+    )
+    assert np.asarray(
+        res["retained_claim_second_moment"]
+    ).item() == pytest.approx(5.12)
+    assert np.asarray(res["retained_premium_rate"]).item() == pytest.approx(
+        188.0
+    )
+    assert np.asarray(res["retained_safety_loading"]).item() == pytest.approx(
+        0.175
+    )
+    assert np.asarray(res["expected_annual_drift"]).item() == pytest.approx(
+        28.0
+    )
+    assert np.asarray(res["minimum_viable_retention"]).item() == pytest.approx(
+        1.0 / 3.0
+    )
     assert bool(np.asarray(res["is_solvent_drift"]).item()) is True
 
 
@@ -69,22 +83,38 @@ def test_proportional_reinsurance_process_vectorized() -> None:
 
 def test_proportional_reinsurance_process_boundary_cases() -> None:
     # Full retention alpha = 1.0 (gross process)
-    res_full = proportional_reinsurance_process(10.0, 5.0, 10.0, 0.20, 0.30, 1.0)
-    assert np.asarray(res_full["retained_safety_loading"]).item() == pytest.approx(0.20)
-    assert np.asarray(res_full["retained_premium_rate"]).item() == pytest.approx(1.20 * 50.0)
+    res_full = proportional_reinsurance_process(
+        10.0, 5.0, 10.0, 0.20, 0.30, 1.0
+    )
+    assert np.asarray(
+        res_full["retained_safety_loading"]
+    ).item() == pytest.approx(0.20)
+    assert np.asarray(
+        res_full["retained_premium_rate"]
+    ).item() == pytest.approx(1.20 * 50.0)
 
     # Insolvent retention below alpha_min (alpha = 0.2 < 1/3)
-    res_insolvent = proportional_reinsurance_process(100.0, 2.0, 4.0, 0.20, 0.30, 0.20)
-    assert float(np.asarray(res_insolvent["retained_safety_loading"]).item()) < 0.0
+    res_insolvent = proportional_reinsurance_process(
+        100.0, 2.0, 4.0, 0.20, 0.30, 0.20
+    )
+    assert (
+        float(np.asarray(res_insolvent["retained_safety_loading"]).item()) < 0.0
+    )
     assert bool(np.asarray(res_insolvent["is_solvent_drift"]).item()) is False
 
     # Zero retention alpha = 0.0 with theta < xi -> -inf loading
-    res_zero = proportional_reinsurance_process(10.0, 5.0, 10.0, 0.20, 0.30, 0.0)
+    res_zero = proportional_reinsurance_process(
+        10.0, 5.0, 10.0, 0.20, 0.30, 0.0
+    )
     assert np.isneginf(np.asarray(res_zero["retained_safety_loading"]).item())
 
     # Zero retention alpha = 0.0 with theta >= xi -> +inf loading
-    res_zero_arb = proportional_reinsurance_process(10.0, 5.0, 10.0, 0.30, 0.20, 0.0)
-    assert np.isposinf(np.asarray(res_zero_arb["retained_safety_loading"]).item())
+    res_zero_arb = proportional_reinsurance_process(
+        10.0, 5.0, 10.0, 0.30, 0.20, 0.0
+    )
+    assert np.isposinf(
+        np.asarray(res_zero_arb["retained_safety_loading"]).item()
+    )
 
 
 # ============================================================================
@@ -105,11 +135,14 @@ def test_excess_of_loss_reinsurance_process_scalar() -> None:
     assert np.asarray(res["retained_claim_mean"]).item() == pytest.approx(
         100.0 * (1.0 - exp_factor)
     )
-    assert np.asarray(res["ceded_claim_mean"]).item() == pytest.approx(100.0 * exp_factor)
+    assert np.asarray(res["ceded_claim_mean"]).item() == pytest.approx(
+        100.0 * exp_factor
+    )
 
     # Invariant: retained mean + ceded mean == gross mean
     gross_recovered = (
-        np.asarray(res["retained_claim_mean"]).item() + np.asarray(res["ceded_claim_mean"]).item()
+        np.asarray(res["retained_claim_mean"]).item()
+        + np.asarray(res["ceded_claim_mean"]).item()
     )
     assert gross_recovered == pytest.approx(100.0)
 
@@ -254,7 +287,10 @@ def test_optimal_reinsurance_retention_excess_of_loss() -> None:
     expected_d_min = 50.0 * np.log(1.5)
     assert opt["minimum_viable_retention"] == pytest.approx(expected_d_min)
     assert d_star > opt["minimum_viable_retention"]
-    assert opt["optimal_adjustment_coefficient"] > opt["gross_adjustment_coefficient"]
+    assert (
+        opt["optimal_adjustment_coefficient"]
+        > opt["gross_adjustment_coefficient"]
+    )
     assert opt["relative_adjustment_gain"] > 0.0
 
     # 2. Case where reinsurer is cheaper (xi = 0.20 < theta = 0.25) -> d_min = 0.0
@@ -395,7 +431,9 @@ def test_collective_reinsurance_non_finite_rejection(bad_val: float) -> None:
     with pytest.raises(ValueError, match="finite"):
         proportional_reinsurance_process(100.0, 2.0, 4.0, 0.20, bad_val)
     with pytest.raises(ValueError, match="finite"):
-        proportional_reinsurance_process(100.0, 2.0, 4.0, 0.20, 0.30, retention_rate=bad_val)
+        proportional_reinsurance_process(
+            100.0, 2.0, 4.0, 0.20, 0.30, retention_rate=bad_val
+        )
 
     # 2. excess_of_loss_reinsurance_process
     with pytest.raises(ValueError, match="finite"):
@@ -443,7 +481,9 @@ def test_collective_reinsurance_non_finite_rejection(bad_val: float) -> None:
     with pytest.raises(ValueError, match="finite"):
         reinsurance_ruin_bound(10.0, 1.0, 1.0, 0.20, bad_val)
     with pytest.raises(ValueError, match="finite"):
-        reinsurance_ruin_bound(10.0, 1.0, 1.0, 0.20, 0.30, retention_rate=bad_val)
+        reinsurance_ruin_bound(
+            10.0, 1.0, 1.0, 0.20, 0.30, retention_rate=bad_val
+        )
 
     # 6. reinsurance_capital_relief
     with pytest.raises(ValueError, match="finite"):
@@ -469,7 +509,9 @@ def test_collective_reinsurance_non_finite_rejection(bad_val: float) -> None:
     with pytest.raises(ValueError, match="finite"):
         compare_de_finetti_lundberg_retention(10.0, 100.0, 0.20, bad_val)
     with pytest.raises(ValueError, match="finite"):
-        compare_de_finetti_lundberg_retention(10.0, 100.0, 0.20, 0.30, claim_rate=bad_val)
+        compare_de_finetti_lundberg_retention(
+            10.0, 100.0, 0.20, 0.30, claim_rate=bad_val
+        )
 
 
 def test_collective_reinsurance_domain_errors() -> None:
@@ -485,9 +527,13 @@ def test_collective_reinsurance_domain_errors() -> None:
     with pytest.raises(ValueError, match="reinsurer_loading"):
         proportional_reinsurance_process(10.0, 2.0, 4.0, 0.20, -0.30)
     with pytest.raises(ValueError, match="retention_rate"):
-        proportional_reinsurance_process(10.0, 2.0, 4.0, 0.20, 0.30, retention_rate=1.5)
+        proportional_reinsurance_process(
+            10.0, 2.0, 4.0, 0.20, 0.30, retention_rate=1.5
+        )
     with pytest.raises(ValueError, match="retention_rate"):
-        proportional_reinsurance_process(10.0, 2.0, 4.0, 0.20, 0.30, retention_rate=-0.1)
+        proportional_reinsurance_process(
+            10.0, 2.0, 4.0, 0.20, 0.30, retention_rate=-0.1
+        )
 
     # 2. excess_of_loss_reinsurance_process domain checks
     with pytest.raises(ValueError, match="claim_rate"):
@@ -501,7 +547,9 @@ def test_collective_reinsurance_domain_errors() -> None:
     with pytest.raises(ValueError, match="reinsurer_loading"):
         excess_of_loss_reinsurance_process(10.0, 100.0, 150.0, 0.20, -0.30)
     with pytest.raises(ValueError, match="Unsupported distribution"):
-        excess_of_loss_reinsurance_process(10.0, 100.0, 50.0, 0.20, 0.30, distribution="gamma")  # type: ignore[arg-type]
+        excess_of_loss_reinsurance_process(
+            10.0, 100.0, 50.0, 0.20, 0.30, distribution="gamma"
+        )  # type: ignore[arg-type]
 
     # 3. reinsurance_adjustment_coefficient domain checks
     with pytest.raises(ValueError, match="claim_rate"):
@@ -513,11 +561,17 @@ def test_collective_reinsurance_domain_errors() -> None:
     with pytest.raises(ValueError, match="reinsurer_loading"):
         reinsurance_adjustment_coefficient(1.0, 1.0, 0.20, -0.30, 0.8)
     with pytest.raises(ValueError, match="Unsupported distribution"):
-        reinsurance_adjustment_coefficient(1.0, 1.0, 0.20, 0.30, 0.8, distribution="pareto")  # type: ignore[arg-type]
+        reinsurance_adjustment_coefficient(
+            1.0, 1.0, 0.20, 0.30, 0.8, distribution="pareto"
+        )  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="treaty_type"):
-        reinsurance_adjustment_coefficient(1.0, 1.0, 0.20, 0.30, 0.8, treaty_type="stop_loss")  # type: ignore[arg-type]
+        reinsurance_adjustment_coefficient(
+            1.0, 1.0, 0.20, 0.30, 0.8, treaty_type="stop_loss"
+        )  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="alpha"):
-        reinsurance_adjustment_coefficient(1.0, 1.0, 0.20, 0.30, -0.1, treaty_type="proportional")
+        reinsurance_adjustment_coefficient(
+            1.0, 1.0, 0.20, 0.30, -0.1, treaty_type="proportional"
+        )
     with pytest.raises(ValueError, match="priority"):
         reinsurance_adjustment_coefficient(
             1.0, 1.0, 0.20, 0.30, -10.0, treaty_type="excess_of_loss"
@@ -529,7 +583,9 @@ def test_collective_reinsurance_domain_errors() -> None:
     with pytest.raises(ValueError, match="reinsurer_loading"):
         optimal_reinsurance_retention(1.0, 10.0, 0.20, -0.30)
     with pytest.raises(ValueError, match="treaty_type"):
-        optimal_reinsurance_retention(1.0, 10.0, 0.20, 0.30, treaty_type="unknown")  # type: ignore[arg-type]
+        optimal_reinsurance_retention(
+            1.0, 10.0, 0.20, 0.30, treaty_type="unknown"
+        )  # type: ignore[arg-type]
 
     # 5. reinsurance_ruin_bound domain checks
     with pytest.raises(ValueError, match="initial_capital"):
@@ -571,7 +627,9 @@ def test_collective_reinsurance_domain_errors() -> None:
     with pytest.raises(ValueError, match="strictly positive"):
         compare_de_finetti_lundberg_retention(10.0, 100.0, 0.20, -0.35)
     with pytest.raises(ValueError, match="strictly positive"):
-        compare_de_finetti_lundberg_retention(10.0, 100.0, 0.20, 0.35, claim_rate=-1.0)
+        compare_de_finetti_lundberg_retention(
+            10.0, 100.0, 0.20, 0.35, claim_rate=-1.0
+        )
 
 
 # ============================================================================
@@ -606,7 +664,9 @@ def test_lundberg_equation_residues_proportional() -> None:
 
         # Lundberg fundamental equation: lambda * (m_Xret(R) - 1) - c_ret * R = 0
         beta = 1.0 / mu1
-        c_ret = (1.0 + theta) * lam * mu1 - (1.0 + xi) * lam * (1.0 - alpha) * mu1
+        c_ret = (1.0 + theta) * lam * mu1 - (1.0 + xi) * lam * (
+            1.0 - alpha
+        ) * mu1
         # X_ret = alpha * X ~ Exp(beta / alpha)
         mgf = beta / (beta - alpha * r_val)
         residue = lam * (mgf - 1.0) - c_ret * r_val
@@ -640,7 +700,9 @@ def test_lundberg_equation_residues_excess_of_loss() -> None:
         beta = 1.0 / mu1
         mu1_ced = mu1 * np.exp(-beta * priority)
         c_ret = (1.0 + theta) * lam * mu1 - (1.0 + xi) * lam * mu1_ced
-        residue = _excess_of_loss_lundberg_equation(r_val, beta, priority, lam, c_ret)
+        residue = _excess_of_loss_lundberg_equation(
+            r_val, beta, priority, lam, c_ret
+        )
         assert residue == pytest.approx(0.0, abs=1e-10)
 
 
@@ -668,8 +730,16 @@ def test_optimal_reinsurance_retention_narrow_domain() -> None:
         reinsurer_loading=1.0,
         claim_rate=1.0,
     )
-    assert opt["minimum_viable_retention"] < comp["de_finetti_optimal_retention"] <= 1.0
-    assert opt["minimum_viable_retention"] < comp["lundberg_optimal_retention"] <= 1.0
+    assert (
+        opt["minimum_viable_retention"]
+        < comp["de_finetti_optimal_retention"]
+        <= 1.0
+    )
+    assert (
+        opt["minimum_viable_retention"]
+        < comp["lundberg_optimal_retention"]
+        <= 1.0
+    )
 
 
 def test_very_small_retention_cases() -> None:
@@ -746,5 +816,7 @@ def test_very_small_retention_cases() -> None:
         )
         assert r_xl_pos > 0.0
         c_ret_cheap = 1.25 - 1.20 * np.exp(-small_d_cheap)
-        res_xl = _excess_of_loss_lundberg_equation(r_xl_pos, 1.0, small_d_cheap, 1.0, c_ret_cheap)
+        res_xl = _excess_of_loss_lundberg_equation(
+            r_xl_pos, 1.0, small_d_cheap, 1.0, c_ret_cheap
+        )
         assert res_xl == pytest.approx(0.0, abs=1e-10)
