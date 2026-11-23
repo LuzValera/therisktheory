@@ -155,6 +155,78 @@ where $2\theta(\alpha) = R_{\text{diff}}$ is the diffusion adjustment coefficien
 
 ---
 
+### 7. Comprehensive Contrast of Reinsurance Boundary Cases
+
+The function `contrast_reinsurance_boundary_cases` systematically benchmarks the portfolio across all boundary conditions:
+
+1. **Full Retention ($\alpha = 1.0$):**
+   - The insurer bears all underwriting risk without reinsurance.
+   - Retained drift: $\mathbb{E}[\Delta U(1.0)] = \eta \mu$.
+   - Retained variance: $\text{Var}(\Delta U(1.0)) = \sigma^2$.
+   - Safety index: $\theta(1.0) = \frac{\eta \mu}{\sigma^2}$.
+   - Diffusion ruin probability: $\psi_{\text{diff}}(u; 1.0) = \exp\left(- 2 \frac{\eta \mu}{\sigma^2} u\right)$.
+
+2. **Full Cession ($\alpha = 0.0$):**
+   - Retained variance is identically zero ($\alpha^2 \sigma^2 = 0$).
+   - If $\xi \le \eta$ (arbitrage regime): Guaranteed non-negative drift $(\eta - \xi)\mu \ge 0$ with zero risk yields $\theta(0) = +\infty$ and $\psi_{\text{diff}}(u) = 0.0$ for any $u > 0$.
+   - If $\xi > \eta$ (costly reinsurance): Guaranteed negative drift $(\eta - \xi)\mu < 0$ with zero risk yields $\theta(0) = -\infty$ and $\psi_{\text{diff}}(u) \equiv 1.0$.
+
+3. **Critical Zero-Drift Retention ($\alpha_{\min} = \max(0, 1 - \eta/\xi)$):**
+   - At $\alpha_{\min}$, net technical drift is exactly zero: $[\eta - (1 - \alpha_{\min})\xi]\mu = 0$.
+   - The safety index vanishes: $\theta(\alpha_{\min}) = 0.0$.
+   - The surplus process is an unbiased martingale, leading to certain ruin: $\psi_{\text{diff}}(u; \alpha_{\min}) = 1.0$ for all $u \ge 0$.
+
+4. **Optimal Retention ($\alpha^*$):**
+   - In the interior regime ($\eta < \xi < 2\eta$), $\alpha^* = 2(1 - \eta/\xi)$ strictly improves solvency:
+     $$\theta(\alpha^*) - \theta(1.0) = \frac{\mu(\xi - 2\eta)^2}{4\sigma^2(\xi - \eta)} > 0$$
+   - Relative safety gain: $\frac{\theta(\alpha^*) - \theta(1.0)}{\theta(1.0)} > 0$.
+   - Ruin reduction ratio: $1 - \frac{\psi_{\text{diff}}(u; \alpha^*)}{\psi_{\text{diff}}(u; 1.0)} > 0$.
+
+5. **Capital Reserve Boundaries:**
+   - Zero reserve ($u = 0$): Ruin is immediate and certain ($\psi \equiv 1.0$).
+   - Infinite reserve ($u \to \infty$): Ruin probability decays to zero ($\lim_{u \to \infty} \psi(u) = 0.0$ whenever $\theta > 0$).
+
+---
+
+## Interoperability with Reserves, Pricing, and Ruin Models
+
+This module establishes bidirectional mathematical interoperability with peer student contributions across the codebase:
+
+### 1. Integration with Topic 1 Premium Foundations (`therisktheory.solvency_pricing.premiums`)
+Under the expected value principle implemented in Topic 1, insurance premiums are defined by:
+$$P = (1 + \eta)\mathbb{E}[S] = (1 + \eta)\mu$$
+The proportional reinsurance framework integrates directly with these pricing functions:
+- Direct loaded premium: $P = (1 + \eta)\mu$ (from `expected_value_premium`).
+- Ceded reinsurer premium: $P_{\text{re}}(\alpha) = (1 - \alpha)(1 + \xi)\mu$.
+- Net retained premium: $P_{\text{ret}}(\alpha) = P - P_{\text{re}}(\alpha)$.
+The net expected drift $\mathbb{E}[\Delta U(\alpha)] = P_{\text{ret}}(\alpha) - \alpha \mu$ is thus entirely consistent with the portfolio pricing principles.
+
+### 2. Integration with Balance Sheet Loss Reserves (Topic 1 / Solvency Frameworks)
+In actuarial practice, the initial capital $u$ available to protect against underwriting ruin consists of:
+$$u = u_{\text{free}} + R_{\text{claim}}$$
+where $u_{\text{free}}$ is free solvency surplus and $R_{\text{claim}}$ represents outstanding loss reserves (IBNR and RBNS).
+The function `interoperate_with_portfolio_reserves_and_pricing` takes these explicit balance-sheet components, maps them to total initial capital $u$, and computes the exact ruin probability reduction achieved by reinsurance.
+
+### 3. Solvency Capital Relief under Target Ruin Tolerance
+Given a target continuous ruin tolerance $\epsilon \in (0, 1)$ (such as $\epsilon = 0.01$ or 1%), the theoretical initial reserve capital required is:
+$$u_\epsilon(\alpha) = \frac{\ln(1/\epsilon)}{2 \theta(\alpha)}$$
+Reinsurance provides initial capital relief:
+$$\Delta u_\epsilon = u_\epsilon(1.0) - u_\epsilon(\alpha^*) = \frac{\ln(1/\epsilon)}{2} \left[ \frac{1}{\theta(1.0)} - \frac{1}{\theta(\alpha^*)} \right]$$
+The percentage relief depends purely on the ratio of safety indices:
+$$\text{Relief Percentage} = 1 - \frac{\theta(1.0)}{\theta(\alpha^*)} = \frac{(\xi - 2\eta)^2}{\xi^2} \times 100\%$$
+*(Actuarial distinction note: This represents theoretical continuous ruin tolerance capital, distinct from 1-year statutory balance-sheet VaR metrics such as Solvency II SCR).*
+
+### 4. Correspondence with Cramér-Lundberg Ruin Theory (Topic 5 / Finite Horizon Ruin)
+The Cramér-Lundberg adjustment coefficient $R > 0$ satisfies $\mathbb{E}[e^{R(X - c)}] = 1$. Expanding the moment generating function to second order:
+$$\mathbb{E}[e^{R(X - c)}] \approx 1 + R(\mu - c) + \frac{R^2}{2} (\sigma^2 + (\mu - c)^2) = 1$$
+For small net loading $c - \mu = \eta \mu$:
+$$R \approx \frac{2(c - \mu)}{\sigma^2} = \frac{2 \eta \mu}{\sigma^2} = 2 \theta$$
+Thus, De Finetti's diffusion proxy safety factor $2\theta$ corresponds directly to the first-order approximation of the Cramér-Lundberg adjustment coefficient $R_{\text{diff}} = 2\theta$. Under heavy traffic ($\eta \to 0$), the diffusion approximation $\psi_{\text{diff}}(u) = \exp(-2\theta u)$ converges to the classical Lundberg bound $\exp(-R u)$.
+
+---
+
+---
+
 ## Domain & Parameter Restrictions
 
 - Retention proportion: $\alpha \in [0.0, 1.0]$.

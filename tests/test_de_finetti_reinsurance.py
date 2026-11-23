@@ -6,9 +6,12 @@ import numpy as np
 import pytest
 
 from therisktheory.finetti_ruin import (
+    contrast_reinsurance_boundary_cases,
     de_finetti_optimal_retention,
     de_finetti_retention_ruin_approximation,
     de_finetti_retention_ruin_bound,
+    de_finetti_ruin_tolerance_capital,
+    interoperate_with_portfolio_reserves_and_pricing,
     proportional_reinsurance_objective,
 )
 
@@ -602,4 +605,246 @@ def test_ruin_bound_invalid_capital() -> None:
             variance_loss=400.0,
             insurer_loading=0.15,
             reinsurer_loading=0.20,
+        )
+
+
+# ============================================================================
+# Tests for contrast_reinsurance_boundary_cases
+# ============================================================================
+
+
+def test_contrast_boundary_cases_interior_optimum() -> None:
+    # mu = 100, var = 400, eta = 0.15, xi = 0.20
+    # regime: interior_optimum, alpha* = 2*(1 - 0.15/0.20) = 0.50
+    res = contrast_reinsurance_boundary_cases(
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.15,
+        reinsurer_loading=0.20,
+        initial_capital=10.0,
+    )
+    assert res["economic_regime"] == "interior_optimum"
+    assert res["initial_capital"] == 10.0
+
+    full = res["full_retention"]
+    assert full["retention_rate"] == 1.0
+    assert full["expected_drift"] == pytest.approx(15.0)
+    assert full["retained_variance"] == pytest.approx(400.0)
+    assert full["safety_index"] == pytest.approx(15.0 / 400.0)
+    assert full["ruin_probability"] == pytest.approx(np.exp(-2.0 * (15.0 / 400.0) * 10.0))
+
+    zero = res["zero_retention"]
+    assert zero["retention_rate"] == 0.0
+    assert zero["expected_drift"] == pytest.approx(-5.0)
+    assert zero["retained_variance"] == 0.0
+    assert np.isneginf(zero["safety_index"])
+    assert zero["ruin_probability"] == 1.0
+
+    crit = res["critical_retention"]
+    # alpha_min = 1 - 0.15/0.20 = 0.25
+    assert crit["retention_rate"] == pytest.approx(0.25)
+    assert crit["expected_drift"] == pytest.approx(0.0)
+    assert crit["safety_index"] == pytest.approx(0.0)
+    assert crit["ruin_probability"] == 1.0
+
+    opt = res["optimal_retention"]
+    assert opt["retention_rate"] == pytest.approx(0.50)
+    assert opt["expected_drift"] == pytest.approx(5.0)
+    assert opt["retained_variance"] == pytest.approx(100.0)
+    assert opt["safety_index"] == pytest.approx(0.05)
+    assert opt["ruin_probability"] == pytest.approx(np.exp(-2.0 * 0.05 * 10.0))
+
+    assert res["relative_safety_gain"] == pytest.approx((0.05 - 0.0375) / 0.0375)
+    assert res["ruin_reduction_ratio"] > 0.0
+    assert res["zero_capital_ruin"] == 1.0
+    assert res["infinite_capital_ruin_limit"] == 0.0
+
+
+def test_contrast_boundary_cases_arbitrage() -> None:
+    # mu = 100, var = 400, eta = 0.20, xi = 0.10 (arbitrage: xi <= eta)
+    res = contrast_reinsurance_boundary_cases(
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.20,
+        reinsurer_loading=0.10,
+        initial_capital=20.0,
+    )
+    assert res["economic_regime"] == "arbitrage"
+    assert res["zero_retention"]["expected_drift"] == pytest.approx(10.0)
+    assert np.isposinf(res["zero_retention"]["safety_index"])
+    assert res["zero_retention"]["ruin_probability"] == 0.0
+    assert res["optimal_retention"]["retention_rate"] == 0.0
+    assert np.isposinf(res["optimal_retention"]["safety_index"])
+    assert res["optimal_retention"]["ruin_probability"] == 0.0
+    assert np.isposinf(res["relative_safety_gain"])
+
+
+def test_contrast_boundary_cases_expensive() -> None:
+    # mu = 100, var = 400, eta = 0.10, xi = 0.25 (expensive: xi >= 2*eta)
+    res = contrast_reinsurance_boundary_cases(
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.10,
+        reinsurer_loading=0.25,
+        initial_capital=15.0,
+    )
+    assert res["economic_regime"] == "expensive"
+    assert res["optimal_retention"]["retention_rate"] == 1.0
+    assert res["relative_safety_gain"] == pytest.approx(0.0)
+    assert res["ruin_reduction_ratio"] == pytest.approx(0.0)
+
+
+def test_contrast_boundary_cases_validation_errors() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        contrast_reinsurance_boundary_cases(np.nan, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="strictly positive"):
+        contrast_reinsurance_boundary_cases(0.0, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="strictly positive"):
+        contrast_reinsurance_boundary_cases(100.0, -1.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="non-negative"):
+        contrast_reinsurance_boundary_cases(100.0, 400.0, -0.1, 0.20)
+    with pytest.raises(ValueError, match="non-negative"):
+        contrast_reinsurance_boundary_cases(100.0, 400.0, 0.15, -0.1)
+    with pytest.raises(ValueError, match="non-negative"):
+        contrast_reinsurance_boundary_cases(100.0, 400.0, 0.15, 0.20, initial_capital=-5.0)
+
+
+# ============================================================================
+# Tests for de_finetti_ruin_tolerance_capital
+# ============================================================================
+
+
+def test_de_finetti_ruin_tolerance_capital_scalar() -> None:
+    # mu = 100, var = 400, eta = 0.15, xi = 0.20 -> alpha* = 0.50, theta* = 0.05
+    # theta_gross = 0.0375
+    # eps = 0.01 -> ln(100) = 4.60517
+    # u_req = 4.60517 / (2 * 0.05) = 46.0517
+    # u_gross = 4.60517 / (2 * 0.0375) = 61.40227
+    res = de_finetti_ruin_tolerance_capital(
+        target_ruin_tolerance=0.01,
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.15,
+        reinsurer_loading=0.20,
+    )
+    assert np.asarray(res["retention_rate"]).item() == pytest.approx(0.50)
+    assert np.asarray(res["required_ruin_tolerance_capital"]).item() == pytest.approx(
+        46.0517, rel=1e-4
+    )
+    assert np.asarray(res["gross_ruin_tolerance_capital"]).item() == pytest.approx(
+        61.40227, rel=1e-4
+    )
+    assert np.asarray(res["capital_relief"]).item() == pytest.approx(15.35057, rel=1e-4)
+    assert np.asarray(res["percentage_capital_relief"]).item() == pytest.approx(25.0)
+
+
+def test_de_finetti_ruin_tolerance_capital_vector() -> None:
+    tolerances = [0.05, 0.01, 0.001]
+    res = de_finetti_ruin_tolerance_capital(
+        target_ruin_tolerance=tolerances,
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.15,
+        reinsurer_loading=0.20,
+    )
+    u_req = res["required_ruin_tolerance_capital"]
+    assert len(u_req) == 3
+    # More stringent tolerance requires strictly higher capital
+    assert u_req[0] < u_req[1] < u_req[2]
+
+
+def test_contrast_boundary_cases_zero_loading() -> None:
+    # Insurer loading = 0.0 -> theta_1 = 0.0 -> rel_gain = 0.0
+    res = contrast_reinsurance_boundary_cases(
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.0,
+        reinsurer_loading=0.10,
+        initial_capital=10.0,
+    )
+    assert res["full_retention"]["safety_index"] == 0.0
+    assert res["relative_safety_gain"] == 0.0
+
+
+def test_de_finetti_ruin_tolerance_capital_validation_errors() -> None:
+    with pytest.raises(ValueError, match="target_ruin_tolerance"):
+        de_finetti_ruin_tolerance_capital(np.nan, 100.0, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="target_ruin_tolerance"):
+        de_finetti_ruin_tolerance_capital(0.0, 100.0, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="target_ruin_tolerance"):
+        de_finetti_ruin_tolerance_capital(1.0, 100.0, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="target_ruin_tolerance"):
+        de_finetti_ruin_tolerance_capital(-0.05, 100.0, 400.0, 0.15, 0.20)
+
+
+# ============================================================================
+# Tests for interoperate_with_portfolio_reserves_and_pricing
+# ============================================================================
+
+
+def test_interoperate_with_portfolio_reserves_and_pricing() -> None:
+    # mu = 100, var = 400, eta = 0.15, xi = 0.20
+    # free_surplus = 40, claim_reserve = 60 -> total u = 100
+    res = interoperate_with_portfolio_reserves_and_pricing(
+        expected_loss=100.0,
+        variance_loss=400.0,
+        insurer_loading=0.15,
+        reinsurer_loading=0.20,
+        free_surplus=40.0,
+        claim_reserve=60.0,
+        target_ruin_tolerance=0.01,
+    )
+
+    pricing = res["pricing"]
+    assert pricing["pure_premium"] == 100.0
+    assert pricing["gross_premium"] == pytest.approx(115.0)
+    # alpha* = 0.5 -> ceded = 0.5 * 1.20 * 100 = 60
+    assert pricing["reinsurer_premium"] == pytest.approx(60.0)
+    assert pricing["retained_premium"] == pytest.approx(55.0)
+
+    reserves = res["balance_sheet_reserves"]
+    assert reserves["free_surplus"] == 40.0
+    assert reserves["claim_reserve"] == 60.0
+    assert reserves["total_initial_capital"] == 100.0
+
+    ruin = res["ruin_solvency"]
+    assert ruin["gross_safety_index"] == pytest.approx(0.0375)
+    assert ruin["optimal_safety_index"] == pytest.approx(0.05)
+    assert ruin["diffusion_adjustment_factor_gross"] == pytest.approx(0.075)
+    assert ruin["diffusion_adjustment_factor_optimal"] == pytest.approx(0.10)
+    # At u = 100:
+    # psi_gross = exp(-2 * 0.0375 * 100) = exp(-7.5) ~ 0.000553
+    # psi_opt = exp(-2 * 0.05 * 100) = exp(-10.0) ~ 0.0000454
+    assert ruin["gross_ruin_probability"] == pytest.approx(np.exp(-7.5))
+    assert ruin["optimal_ruin_probability"] == pytest.approx(np.exp(-10.0))
+    assert ruin["ruin_reduction_ratio"] == pytest.approx(1.0 - np.exp(-2.5))
+    assert ruin["percentage_capital_relief"] == pytest.approx(25.0)
+
+
+def test_interoperate_validation_errors() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        interoperate_with_portfolio_reserves_and_pricing(np.nan, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="strictly positive"):
+        interoperate_with_portfolio_reserves_and_pricing(0.0, 400.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="strictly positive"):
+        interoperate_with_portfolio_reserves_and_pricing(100.0, -10.0, 0.15, 0.20)
+    with pytest.raises(ValueError, match="non-negative"):
+        interoperate_with_portfolio_reserves_and_pricing(100.0, 400.0, -0.1, 0.20)
+    with pytest.raises(ValueError, match="non-negative"):
+        interoperate_with_portfolio_reserves_and_pricing(100.0, 400.0, 0.15, -0.20)
+    with pytest.raises(ValueError, match="free_surplus"):
+        interoperate_with_portfolio_reserves_and_pricing(
+            100.0, 400.0, 0.15, 0.20, free_surplus=-1.0
+        )
+    with pytest.raises(ValueError, match="claim_reserve"):
+        interoperate_with_portfolio_reserves_and_pricing(
+            100.0, 400.0, 0.15, 0.20, claim_reserve=-5.0
+        )
+    with pytest.raises(ValueError, match="target_ruin_tolerance"):
+        interoperate_with_portfolio_reserves_and_pricing(
+            100.0, 400.0, 0.15, 0.20, target_ruin_tolerance=1.5
+        )
+    with pytest.raises(ValueError, match="target_ruin_tolerance"):
+        interoperate_with_portfolio_reserves_and_pricing(
+            100.0, 400.0, 0.15, 0.20, target_ruin_tolerance=0.0
         )

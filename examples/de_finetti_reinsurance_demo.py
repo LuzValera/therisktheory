@@ -13,9 +13,11 @@ from __future__ import annotations
 import numpy as np
 
 from therisktheory.finetti_ruin import (
+    contrast_reinsurance_boundary_cases,
     de_finetti_optimal_retention,
     de_finetti_retention_ruin_approximation,
     de_finetti_retention_ruin_bound,
+    interoperate_with_portfolio_reserves_and_pricing,
     proportional_reinsurance_objective,
 )
 
@@ -129,6 +131,59 @@ def main() -> None:
     print("\n5. Ruin Probability Diffusion Approximation vs. Initial Capital:")
     for u, psi in zip(capitals, ruin_approx, strict=True):
         print(f"   Capital u = {u:6.0f} -> psi_diff(u) = {psi:.6f}")
+
+    # -------------------------------------------------------------------------
+    # 6. Contrast of All Reinsurance Boundary Cases
+    # -------------------------------------------------------------------------
+    boundaries = contrast_reinsurance_boundary_cases(
+        expected_loss=expected_claim,
+        variance_loss=variance_claim,
+        insurer_loading=insurer_loading,
+        reinsurer_loading=reinsurer_loading,
+        initial_capital=5000.0,
+    )
+    print("\n6. Reinsurance Boundary Cases Contrast (u = 5000):")
+    print(f"   Economic Regime:            {boundaries['economic_regime']}")
+    print(
+        f"   Full Retention (alpha=1.0): theta = {boundaries['full_retention']['safety_index']:.6f}, psi = {boundaries['full_retention']['ruin_probability']:.6f}"
+    )
+    print(
+        f"   Optimal (alpha={boundaries['optimal_retention']['retention_rate']:.2f}):      theta = {boundaries['optimal_retention']['safety_index']:.6f}, psi = {boundaries['optimal_retention']['ruin_probability']:.6f}"
+    )
+    print(
+        f"   Critical (alpha_min={boundaries['critical_retention']['retention_rate']:.2f}):  theta = {boundaries['critical_retention']['safety_index']:.6f}, psi = {boundaries['critical_retention']['ruin_probability']:.6f}"
+    )
+    print(
+        f"   Zero Retention (alpha=0.0): theta = {boundaries['zero_retention']['safety_index']}, psi = {boundaries['zero_retention']['ruin_probability']:.6f}"
+    )
+    print(f"   Relative Safety Index Gain: {boundaries['relative_safety_gain']:.2%}")
+    print(f"   Ruin Probability Reduction: {boundaries['ruin_reduction_ratio']:.2%}")
+
+    # -------------------------------------------------------------------------
+    # 7. Interoperability with Reserves, Pricing, and Ruin Models
+    # -------------------------------------------------------------------------
+    interop = interoperate_with_portfolio_reserves_and_pricing(
+        expected_loss=expected_claim,
+        variance_loss=variance_claim,
+        insurer_loading=insurer_loading,
+        reinsurer_loading=reinsurer_loading,
+        free_surplus=3000.0,
+        claim_reserve=7000.0,
+        target_ruin_tolerance=0.005,
+    )
+    print("\n7. Interoperability with Reserves and Solvency Pricing:")
+    print(f"   Topic 1 Gross Premium:      {interop['pricing']['gross_premium']:.2f}")
+    print(f"   Ceded Reinsurance Premium:  {interop['pricing']['reinsurer_premium']:.2f}")
+    print(f"   Net Retained Premium:       {interop['pricing']['retained_premium']:.2f}")
+    print(
+        f"   Initial Capital (3k+7k):    {interop['balance_sheet_reserves']['total_initial_capital']:.2f}"
+    )
+    print(
+        f"   Cramér-Lundberg Proxy R:    Gross = {interop['ruin_solvency']['diffusion_adjustment_factor_gross']:.6f}, Optimal = {interop['ruin_solvency']['diffusion_adjustment_factor_optimal']:.6f}"
+    )
+    print(
+        f"   Capital Relief (0.5% tol):  {interop['ruin_solvency']['capital_relief']:.2f} ({interop['ruin_solvency']['percentage_capital_relief']:.2f}%)"
+    )
 
     print("\n" + "=" * 72)
 
