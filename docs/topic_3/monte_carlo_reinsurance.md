@@ -80,6 +80,65 @@ $$\mathcal{R}_{\text{system}} = 1 - \frac{\text{Var}(Y_1) + \text{Var}(Y_2)}{\te
 
 ---
 
+### 5. Monte Carlo Error Margins & Confidence Intervals
+
+Monte Carlo estimation of aggregate loss expectation $\mathbb{E}[S]$ is governed by the Central Limit Theorem. For $M$ independent simulated trajectories $S_1, \dots, S_M$:
+
+- Point estimator (Sample Mean):
+  $$\hat{\mu}_S = \frac{1}{M}\sum_{m=1}^M S_m$$
+
+- Unbiased Sample Variance:
+  $$\hat{\sigma}_S^2 = \frac{1}{M - 1}\sum_{m=1}^M (S_m - \hat{\mu}_S)^2$$
+
+- Standard Error of the Estimator (SE):
+  $$\text{SE}(\hat{\mu}_S) = \frac{\hat{\sigma}_S}{\sqrt{M}}$$
+
+- Asymptotic $(1 - \gamma)$ Confidence Interval:
+  $$\left[ \hat{\mu}_S - z_{1 - \gamma/2} \frac{\hat{\sigma}_S}{\sqrt{M}}, \quad \hat{\mu}_S + z_{1 - \gamma/2} \frac{\hat{\sigma}_S}{\sqrt{M}} \right]$$
+  where $z_{1 - \gamma/2} = \Phi^{-1}(1 - \gamma/2)$ (e.g., $1.96$ for a 95% confidence level).
+
+The function `aggregate_loss_monte_carlo_metrics` evaluates these intervals alongside the relative standard error $\text{RSE} = \text{SE}/\hat{\mu}_S$, empirical Value-at-Risk ($\text{VaR}_{0.95}, \text{VaR}_{0.99}$), Tail Value-at-Risk ($\text{TVaR}_{0.95}, \text{TVaR}_{0.99}$), and zero-loss empirical frequency $\hat{\mathbb{P}}(S = 0)$.
+
+---
+
+### 6. Closed-Form Analytical Benchmarking (Compound Poisson-Exponential)
+
+When claim counts follow a Poisson distribution ($N \sim \text{Poisson}(\lambda)$) and claim severities follow an Exponential distribution ($X_i \sim \text{Exponential}(\text{scale}=\beta)$), the aggregate loss $S$ has exact closed-form analytical moments:
+
+- Expected Aggregate Loss:
+  $$\mathbb{E}[S] = \lambda \beta$$
+
+- Aggregate Loss Variance:
+  $$\text{Var}(S) = \lambda \mathbb{E}[X^2] = 2 \lambda \beta^2$$
+
+- Exact Probability of Zero Losses:
+  $$\mathbb{P}(S = 0) = \mathbb{P}(N = 0) = e^{-\lambda}$$
+
+- Exact Skewness:
+  $$\gamma_1(S) = \frac{3}{\sqrt{2\lambda}}$$
+
+The function `benchmark_compound_poisson_exponential` executes controlled-seed Monte Carlo simulations and compares the empirical estimators against these exact analytical values, formally validating that the true mean $\mathbb{E}[S]$ falls within the simulation confidence interval.
+
+---
+
+### 7. Interoperability with Frequency and Severity Models of Other Authors
+
+The simulation engine adheres to open callable generator interfaces:
+- Frequency interface: `sampler(size: int, rng: np.random.Generator) -> NDArray[np.int64]`
+- Severity interface: `sampler(size: int, rng: np.random.Generator) -> NDArray[np.float64]`
+
+This enables direct plug-and-play integration with:
+1. **Topic 1 Pricing Models (`therisktheory.solvency_pricing.premiums`):**
+   Comparing empirical aggregate losses with `pure_premium` and `expected_aggregate_loss` from Topic 1.
+2. **Peer Frequency Models (Topic 3 / Frequency Processes):**
+   Integrating custom discrete samplers (e.g., Binomial, Zero-Inflated Poisson, Delaporte).
+3. **Peer Severity Models:**
+   Integrating custom heavy-tailed samplers (e.g., Burr Type XII, Generalized Pareto, Log-logistic).
+4. **Controlled Seed Reproducibility:**
+   Guaranteeing deterministic bitwise reproducibility across independent test and audit suites via `random_state` (seed integer or `np.random.Generator`).
+
+---
+
 ## Domain & Parameter Bounds
 
 - Simulation count: $M \ge 1$.

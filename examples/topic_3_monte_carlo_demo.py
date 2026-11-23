@@ -13,6 +13,8 @@ from __future__ import annotations
 import numpy as np
 
 from therisktheory.severity_aggregate import (
+    aggregate_loss_monte_carlo_metrics,
+    benchmark_compound_poisson_exponential,
     insurer_reciprocity_metric,
     optimal_reinsurance,
     simulate_aggregate_loss,
@@ -108,6 +110,39 @@ def main() -> None:
     print(f"   Insurer 1 Variance Reduction:   {float(rec_results['variance_reduction_1']):.2%}")
     print(f"   Insurer 2 Variance Reduction:   {float(rec_results['variance_reduction_2']):.2%}")
     print(f"   Total Reciprocity System Gain:  {float(rec_results['total_reciprocity_gain']):.2%}")
+
+    # 6. Monte Carlo Error Margins & Confidence Intervals
+    metrics = aggregate_loss_monte_carlo_metrics(mc_losses, confidence_level=0.95)
+    ci = metrics["confidence_interval"]
+    print("\n6. Monte Carlo Error Margins & Confidence Interval (95%):")
+    print(f"   Standard Error (SE):            {metrics['standard_error']:.2f}")
+    print(f"   Margin of Error (MoE):          {metrics['margin_of_error']:.2f}")
+    print(f"   95% Confidence Interval:        [{ci[0]:.2f}, {ci[1]:.2f}]")
+    print(f"   Relative Standard Error:        {metrics['relative_standard_error']:.3%}")
+    print(f"   Empirical VaR (95%):            {metrics['value_at_risk_95']:.2f}")
+    print(f"   Empirical TVaR (95%):           {metrics['tail_value_at_risk_95']:.2f}")
+
+    # 7. Exact Analytical Benchmarking (Compound Poisson-Exponential)
+    bench = benchmark_compound_poisson_exponential(
+        claim_rate=10.0,
+        claim_mean=100.0,
+        num_simulations=50_000,
+        confidence_level=0.95,
+        random_state=42,
+    )
+    b_ana = bench["analytical"]
+    b_mc = bench["monte_carlo"]
+    b_ci = b_mc["confidence_interval"]
+    print("\n7. Closed-Form Benchmark (Compound Poisson-Exponential):")
+    print(f"   Exact Analytical E[S]:          {b_ana['expected_aggregate_loss']:.2f}")
+    print(
+        f"   Monte Carlo Estimate:           {b_mc['mean']:.2f} (SE: {b_mc['standard_error']:.2f})"
+    )
+    print(f"   95% Error Interval:             [{b_ci[0]:.2f}, {b_ci[1]:.2f}]")
+    print(
+        f"   Analytical Mean in CI?          {bench['validation']['mean_within_confidence_interval']}"
+    )
+    print(f"   Relative Error of Mean:         {bench['validation']['relative_error_mean']:.4%}")
 
     print("\n" + "=" * 75)
 

@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 
 from therisktheory.severity_aggregate import (
+    aggregate_loss_monte_carlo_metrics,
+    benchmark_compound_poisson_exponential,
     optimal_reinsurance,
     simulate_aggregate_loss,
     technical_result_variance,
@@ -358,3 +360,159 @@ def test_simulate_aggregate_loss_invalid_inputs() -> None:
             severity_dist="exponential",
             num_simulations=2,
         )
+
+
+# ============================================================================
+# Tests for seed reproducibility and error intervals
+# ============================================================================
+
+
+def test_controlled_seed_reproducibility() -> None:
+    """Verify that identical random seeds produce identical bitwise simulations."""
+    seed = 12345
+    run1 = simulate_aggregate_loss(
+        frequency_dist="poisson",
+        severity_dist="exponential",
+        num_simulations=500,
+        frequency_params={"lam": 5.0},
+        severity_params={"scale": 100.0},
+        random_state=seed,
+    )
+    run2 = simulate_aggregate_loss(
+        frequency_dist="poisson",
+        severity_dist="exponential",
+        num_simulations=500,
+        frequency_params={"lam": 5.0},
+        severity_params={"scale": 100.0},
+        random_state=seed,
+    )
+    run3 = simulate_aggregate_loss(
+        frequency_dist="poisson",
+        severity_dist="exponential",
+        num_simulations=500,
+        frequency_params={"lam": 5.0},
+        severity_params={"scale": 100.0},
+        random_state=54321,
+    )
+    assert np.array_equal(run1, run2)
+    assert not np.array_equal(run1, run3)
+
+    # Test with np.random.Generator directly
+    rng = np.random.default_rng(999)
+    run_rng = simulate_aggregate_loss(
+        frequency_dist="poisson",
+        severity_dist="exponential",
+        num_simulations=100,
+        random_state=rng,
+    )
+    assert run_rng.shape == (100,)
+
+
+def test_aggregate_loss_monte_carlo_metrics() -> None:
+    """Verify Monte Carlo metrics, standard error, and confidence intervals."""
+    losses = np.array([100.0, 200.0, 300.0, 400.0, 500.0])
+    metrics = aggregate_loss_monte_carlo_metrics(losses, confidence_level=0.95)
+
+    assert metrics["sample_size"] == 5
+    assert metrics["mean"] == pytest.approx(300.0)
+    assert metrics["variance"] == pytest.approx(25000.0)
+    assert metrics["standard_deviation"] == pytest.approx(np.sqrt(25000.0))
+    expected_se = np.sqrt(25000.0) / np.sqrt(5)
+    assert metrics["standard_error"] == pytest.approx(expected_se)
+    assert metrics["margin_of_error"] > 0.0
+    ci = metrics["confidence_interval"]
+    assert ci[0] < metrics["mean"] < ci[1]
+    assert metrics["relative_standard_error"] == pytest.approx(expected_se / 300.0)
+    assert metrics["zero_loss_probability"] == 0.0
+    assert metrics["value_at_risk_95"] > metrics["mean"]
+    assert metrics["tail_value_at_risk_95"] >= metrics["value_at_risk_95"]
+
+
+def test_aggregate_loss_monte_carlo_metrics_validation_errors() -> None:
+    with pytest.raises(ValueError, match="confidence_level"):
+        aggregate_loss_monte_carlo_metrics([10.0, 20.0], confidence_level=0.0)
+    with pytest.raises(ValueError, match="confidence_level"):
+        aggregate_loss_monte_carlo_metrics([10.0, 20.0], confidence_level=1.0)
+    with pytest.raises(ValueError, match="at least 2 observations"):
+        aggregate_loss_monte_carlo_metrics([10.0])
+    with pytest.raises(ValueError, match="finite"):
+        aggregate_loss_monte_carlo_metrics([10.0, np.nan])
+    with pytest.raises(ValueError, match="negative"):
+        aggregate_loss_monte_carlo_metrics([10.0, -5.0])
+
+
+def test_benchmark_compound_poisson_exponential() -> None:
+    """Benchmark MC simulation against exact analytical Compound Poisson-Exponential."""
+    lam = 5.0
+    scale = 100.0
+    res = benchmark_compound_poisson_exponential(
+        claim_rate=lam,
+        claim_mean=scale,
+        num_simulations=30_000,
+        confidence_level=0.95,
+        random_state=42,
+    )
+
+    ana = res["analytical"]
+    assert ana["expected_aggregate_loss"] == pytest.approx(500.0)
+    assert ana["variance_aggregate_loss"] == pytest.approx(2.0 * 5.0 * (100.0**2))
+    assert ana["zero_loss_probability"] == pytest.approx(np.exp(-5.0))
+    assert ana["skewness"] == pytest.approx(3.0 / np.sqrt(10.0))
+
+    mc = res["monte_carlo"]
+    assert mc["sample_size"] == 30_000
+    assert mc["mean"] == pytest.approx(500.0, rel=0.05)
+
+    val = res["validation"]
+    # Exact expectation must fall strictly within empirical 95% confidence interval
+    assert val["mean_within_confidence_interval"] is True
+    assert val["relative_error_mean"] < 0.02
+    assert val["relative_error_variance"] < 0.05
+    assert val["absolute_error_zero_prob"] < 0.01
+
+
+def test_benchmark_compound_poisson_exponential_validation() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        benchmark_compound_poisson_exponential(np.nan, 100.0)
+    with pytest.raises(ValueError, match="strictly positive"):
+        benchmark_compound_poisson_exponential(0.0, 100.0)
+    with pytest.raises(ValueError, match="strictly positive"):
+        benchmark_compound_poisson_exponential(5.0, -10.0)
+    with pytest.raises(ValueError, match=">= 100"):
+        benchmark_compound_poisson_exponential(5.0, 100.0, num_simulations=50)
+
+
+# ============================================================================
+# Tests for integration with models of other authors
+# ============================================================================
+
+
+def test_integration_with_peer_frequency_and_severity_models() -> None:
+    """Demonstrate interoperability with custom peer frequency and severity models."""
+
+    # 1. Custom peer frequency: Binomial frequency (n=20, p=0.25 -> E[N]=5)
+    def peer_binomial_frequency(size: int, rng: np.random.Generator) -> np.ndarray:
+        return rng.binomial(n=20, p=0.25, size=size)
+
+    # 2. Custom peer severity: Burr Type XII severity (shape c=2, d=3, scale=100)
+    def peer_burr_severity(size: int, rng: np.random.Generator) -> np.ndarray:
+        # Generate Burr XII via inverse transform: X = scale * ((1 - U)^(-1/d) - 1)^(1/c)
+        u = rng.uniform(0.0, 1.0, size=size)
+        return 100.0 * (((1.0 - u) ** (-1.0 / 3.0) - 1.0) ** (1.0 / 2.0))
+
+    sims = simulate_aggregate_loss(
+        frequency_dist=peer_binomial_frequency,
+        severity_dist=peer_burr_severity,
+        num_simulations=2000,
+        random_state=42,
+    )
+    assert sims.shape == (2000,)
+    assert np.all(sims >= 0.0)
+    assert np.mean(sims) > 0.0
+
+    # 3. Summary metrics and error intervals on peer models
+    metrics = aggregate_loss_monte_carlo_metrics(sims, confidence_level=0.99)
+    assert metrics["sample_size"] == 2000
+    assert metrics["standard_error"] > 0.0
+    ci = metrics["confidence_interval"]
+    assert ci[0] < metrics["mean"] < ci[1]
