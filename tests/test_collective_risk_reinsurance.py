@@ -241,6 +241,8 @@ def test_optimal_reinsurance_retention_proportional() -> None:
 
 
 def test_optimal_reinsurance_retention_excess_of_loss() -> None:
+    # 1. Case where reinsurer is more expensive (xi = 0.30 > theta = 0.20)
+    # Minimum viable priority d_min = mu1 * ln(xi / theta) = 50 * ln(1.5)
     opt = optimal_reinsurance_retention(
         claim_rate=5.0,
         claim_mean=50.0,
@@ -249,8 +251,23 @@ def test_optimal_reinsurance_retention_excess_of_loss() -> None:
         treaty_type="excess_of_loss",
     )
     d_star = opt["optimal_retention"]
-    assert d_star > 0.0
-    assert opt["optimal_adjustment_coefficient"] > 0.0
+    expected_d_min = 50.0 * np.log(1.5)
+    assert opt["minimum_viable_retention"] == pytest.approx(expected_d_min)
+    assert d_star > opt["minimum_viable_retention"]
+    assert opt["optimal_adjustment_coefficient"] > opt["gross_adjustment_coefficient"]
+    assert opt["relative_adjustment_gain"] > 0.0
+
+    # 2. Case where reinsurer is cheaper (xi = 0.20 < theta = 0.25) -> d_min = 0.0
+    opt_cheap = optimal_reinsurance_retention(
+        claim_rate=5.0,
+        claim_mean=50.0,
+        safety_loading=0.25,
+        reinsurer_loading=0.20,
+        treaty_type="excess_of_loss",
+    )
+    assert opt_cheap["minimum_viable_retention"] == 0.0
+    assert opt_cheap["optimal_retention"] > 0.0
+    assert opt_cheap["optimal_adjustment_coefficient"] > 0.0
 
 
 # ============================================================================
@@ -328,6 +345,9 @@ def test_reinsurance_capital_relief_metrics() -> None:
     assert "reinsured_required_capital" in relief
     assert "capital_relief" in relief
     assert "percentage_capital_relief" in relief
+    assert "gross_ruin_tolerance_capital" in relief
+    assert "reinsured_ruin_tolerance_capital" in relief
+    assert "ruin_tolerance_capital_relief" in relief
 
     u_gross = float(relief["gross_required_capital"])
     u_re = float(relief["reinsured_required_capital"])
@@ -650,3 +670,81 @@ def test_optimal_reinsurance_retention_narrow_domain() -> None:
     )
     assert opt["minimum_viable_retention"] < comp["de_finetti_optimal_retention"] <= 1.0
     assert opt["minimum_viable_retention"] < comp["lundberg_optimal_retention"] <= 1.0
+
+
+def test_very_small_retention_cases() -> None:
+    """Execute cases with very small retentions (alpha -> 0+ and d -> 0+)."""
+    # 1. Proportional with xi < theta (arbitrage cover where alpha -> 0+ yields large R)
+    for small_alpha in [1e-3, 1e-4, 1e-6]:
+        r_val = float(
+            np.asarray(
+                reinsurance_adjustment_coefficient(
+                    claim_rate=1.0,
+                    claim_mean=1.0,
+                    safety_loading=0.20,
+                    reinsurer_loading=0.10,
+                    retention_param=small_alpha,
+                    treaty_type="proportional",
+                )
+            ).item()
+        )
+        assert r_val > 0.0
+        # Check Lundberg residue (R is large ~ 10^6, float rounding is ~ 1e-10)
+        c_ret = (1.0 + 0.20) - (1.0 + 0.10) * (1.0 - small_alpha)
+        mgf = 1.0 / (1.0 - small_alpha * r_val)
+        residue = (mgf - 1.0) - c_ret * r_val
+        # Relative error in Lundberg equation
+        rel_residue = abs(residue) / (c_ret * r_val)
+        assert rel_residue < 1e-8
+
+    # 2. Proportional with xi > theta (where small alpha is below alpha_min -> R = 0.0)
+    for insolv_alpha in [0.0, 1e-4, 1e-6]:
+        r_zero = float(
+            np.asarray(
+                reinsurance_adjustment_coefficient(
+                    claim_rate=1.0,
+                    claim_mean=1.0,
+                    safety_loading=0.20,
+                    reinsurer_loading=0.30,
+                    retention_param=insolv_alpha,
+                    treaty_type="proportional",
+                )
+            ).item()
+        )
+        assert r_zero == 0.0
+
+    # 3. Excess-of-Loss with xi > theta (d <= d_min -> R = 0.0)
+    # theta = 0.20, xi = 0.30, mu1 = 1.0 -> d_min = ln(1.5) ~ 0.4055
+    for small_d in [0.30, 0.10, 0.01, 1e-4]:
+        r_xl_zero = float(
+            np.asarray(
+                reinsurance_adjustment_coefficient(
+                    claim_rate=1.0,
+                    claim_mean=1.0,
+                    safety_loading=0.20,
+                    reinsurer_loading=0.30,
+                    retention_param=small_d,
+                    treaty_type="excess_of_loss",
+                )
+            ).item()
+        )
+        assert r_xl_zero == 0.0
+
+    # 4. Excess-of-Loss with xi <= theta (d -> 0+ where drift is positive -> R > 0)
+    for small_d_cheap in [0.05, 0.01]:
+        r_xl_pos = float(
+            np.asarray(
+                reinsurance_adjustment_coefficient(
+                    claim_rate=1.0,
+                    claim_mean=1.0,
+                    safety_loading=0.25,
+                    reinsurer_loading=0.20,
+                    retention_param=small_d_cheap,
+                    treaty_type="excess_of_loss",
+                )
+            ).item()
+        )
+        assert r_xl_pos > 0.0
+        c_ret_cheap = 1.25 - 1.20 * np.exp(-small_d_cheap)
+        res_xl = _excess_of_loss_lundberg_equation(r_xl_pos, 1.0, small_d_cheap, 1.0, c_ret_cheap)
+        assert res_xl == pytest.approx(0.0, abs=1e-10)

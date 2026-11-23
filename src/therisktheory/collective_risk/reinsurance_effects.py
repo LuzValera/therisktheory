@@ -611,7 +611,15 @@ def optimal_reinsurance_retention(
         }
 
     if treaty_type == "excess_of_loss":
-        # Search priority in range [0.1 * claim_mean, 20.0 * claim_mean]
+        # Minimum viable priority: net drift > 0 <=> theta - xi * exp(-d / mu1) > 0
+        if reinsurer_loading > safety_loading:
+            d_min = float(claim_mean * np.log(reinsurer_loading / safety_loading))
+        else:
+            d_min = 0.0
+
+        lower_bound = d_min + 1e-4 * claim_mean
+        upper_bound = max(d_min + 15.0 * claim_mean, 20.0 * claim_mean)
+
         def neg_r_xl(d_val: float) -> float:
             r = reinsurance_adjustment_coefficient(
                 claim_rate=claim_rate,
@@ -626,7 +634,7 @@ def optimal_reinsurance_retention(
 
         opt_res = minimize_scalar(
             neg_r_xl,
-            bounds=(0.1 * claim_mean, 15.0 * claim_mean),
+            bounds=(lower_bound, upper_bound),
             method="bounded",
         )
         d_opt = float(opt_res.x)
@@ -649,7 +657,7 @@ def optimal_reinsurance_retention(
             "gross_adjustment_coefficient": r_gross,
             "relative_adjustment_gain": gain,
             "retained_safety_loading": th_ret,
-            "minimum_viable_retention": 0.0,
+            "minimum_viable_retention": d_min,
         }
 
     raise ValueError(f"treaty_type must be 'proportional' or 'excess_of_loss', got {treaty_type!r}")
@@ -807,24 +815,30 @@ def reinsurance_capital_relief(
     reinsurer_loading: float | ArrayLike,
     retention_rate: float | ArrayLike,
 ) -> dict[str, NDArray[np.float64]]:
-    r"""Compute required solvency capital and capital relief achieved via reinsurance.
+    r"""Compute initial capital and capital relief based on ruin probability tolerance.
 
-    For a target maximum ruin probability :math:`\epsilon \in (0, 1)` under the exact
-    Cramér-Lundberg formula for exponential claims:
+    For a target maximum ultimate ruin probability tolerance :math:`\epsilon \in (0, 1)` under
+    the exact Cramér-Lundberg renewal model for exponential claims:
 
     .. math::
         \psi(u) = \frac{1}{1 + \theta} e^{-R u} = \epsilon
         \implies u_{\epsilon} = \frac{1}{R} \ln\left(\frac{1}{(1 + \theta)\epsilon}\right)
 
     Reinsurance with retention :math:`\alpha` increases the adjustment coefficient to
-    :math:`R_{\text{ret}} > R_{\text{gross}}`, reducing required capital to
-    :math:`u_{\epsilon}^{\text{re}}`. The solvency capital relief is:
+    :math:`R_{\text{ret}} > R_{\text{gross}}`, reducing required initial ruin-tolerance capital
+    to :math:`u_{\epsilon}^{\text{re}}`. The capital relief achieved under this tolerance is:
 
     .. math::
         \Delta u = u_{\epsilon}^{\text{gross}} - u_{\epsilon}^{\text{re}}
 
+    .. note::
+        The reserve :math:`u_{\epsilon}` reflects theoretical initial capital required so that
+        the ultimate ruin probability satisfies :math:`\psi(u) \le \epsilon`. It should be
+        distinguished from statutory regulatory capital requirements (such as Solvency II SCR
+        or NAIC RBC), which are derived from one-year balance-sheet risk distributions.
+
     Args:
-        ruin_tolerance: Solvency ruin probability tolerance :math:`\epsilon \in (0, 1)`.
+        ruin_tolerance: Target ultimate ruin probability tolerance :math:`\epsilon \in (0, 1)`.
         claim_rate: Poisson claim rate :math:`\lambda > 0`.
         claim_mean: Gross claim expected value :math:`\mu_1 > 0`.
         safety_loading: Cedent safety loading :math:`\theta > 0`.
@@ -833,10 +847,13 @@ def reinsurance_capital_relief(
 
     Returns:
         dict[str, NDArray[np.float64]]: Dictionary containing:
-            - ``"gross_required_capital"``: Required capital without reinsurance.
-            - ``"reinsured_required_capital"``: Required capital with reinsurance.
+            - ``"gross_required_capital"``: Ruin-tolerance initial capital without reinsurance.
+            - ``"reinsured_required_capital"``: Ruin-tolerance initial capital with reinsurance.
             - ``"capital_relief"``: Absolute capital reduction :math:`\Delta u`.
             - ``"percentage_capital_relief"``: Percentage capital relief.
+            - ``"gross_ruin_tolerance_capital"``: Alias for gross ruin-tolerance capital.
+            - ``"reinsured_ruin_tolerance_capital"``: Alias for reinsured capital.
+            - ``"ruin_tolerance_capital_relief"``: Alias for absolute capital relief.
 
     Raises:
         ValueError: If inputs contain non-finite numbers or violate domain bounds
@@ -912,6 +929,9 @@ def reinsurance_capital_relief(
         "reinsured_required_capital": np.asarray(u_ret, dtype=np.float64),
         "capital_relief": np.asarray(diff, dtype=np.float64),
         "percentage_capital_relief": np.asarray(pct, dtype=np.float64),
+        "gross_ruin_tolerance_capital": np.asarray(u_gross, dtype=np.float64),
+        "reinsured_ruin_tolerance_capital": np.asarray(u_ret, dtype=np.float64),
+        "ruin_tolerance_capital_relief": np.asarray(diff, dtype=np.float64),
     }
 
 
